@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Pairing Test - Local Server</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .status.info { background: #e3f2fd; color: #1976d2; }
+        .status.success { background: #e8f5e9; color: #2e7d32; }
+        .status.error { background: #ffebee; color: #c62828; }
+        .status.warning { background: #fff3e0; color: #ef6c00; }
+        input {
+            width: 100%;
+            padding: 12px;
+            font-size: 18px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            letter-spacing: 2px;
+            box-sizing: border-box;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 0;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .log {
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #ddd;
+            padding-left: 10px;
+        }
+        .log-entry.success { border-color: #4caf50; }
+        .log-entry.error { border-color: #f44336; }
+        .log-entry.info { border-color: #2196f3; }
+        .server-status {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+        .server-badge {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .server-badge.active { background: #4caf50; color: white; }
+        .server-badge.inactive { background: #f44336; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 Mobile Pairing Test - Local Server</h1>
+        
+        <div class="server-status">
+            <div>
+                <strong>Local Test Server:</strong>
+                <span id="serverStatus" class="server-badge inactive">Checking...</span>
+            </div>
+            <div>
+                <strong>WebSocket:</strong>
+                <span id="wsStatus" class="server-badge inactive">Disconnected</span>
+            </div>
+        </div>
+        
+        <div id="status" class="status info">
+            Enter the 6-digit pairing code from desktop
+        </div>
+        
+        <input type="text" 
+               id="pairingCode" 
+               placeholder="000000" 
+               maxlength="6" 
+               pattern="[0-9]{6}"
+               inputmode="numeric">
+        
+        <button id="connectBtn" onclick="connectWithCode()">
+            Connect to Desktop
+        </button>
+        
+        <button id="disconnectBtn" onclick="disconnect()" style="display: none;">
+            Disconnect
+        </button>
+        
+        <button onclick="clearLog()">Clear Log</button>
+        
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        const sessionId = `mobile-test-${Date.now()}`;
+        
+        // Check server status on load
+        checkServerStatus();
+        
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:8089/api/auth/verify');
+                if (response.ok) {
+                    document.getElementById('serverStatus').textContent = 'Online';
+                    document.getElementById('serverStatus').className = 'server-badge active';
+                    log('✅ Local test server is online', 'success');
+                } else {
+                    throw new Error('Server not responding');
+                }
+            } catch (error) {
+                document.getElementById('serverStatus').textContent = 'Offline';
+                document.getElementById('serverStatus').className = 'server-badge inactive';
+                log('❌ Local test server is offline', 'error');
+                updateStatus('Local test server is not running. Start it first!', 'error');
+            }
+        }
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+            console.log(`[Mobile Test] ${message}`);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            log('Log cleared', 'info');
+        }
+        
+        async function connectWithCode() {
+            const code = document.getElementById('pairingCode').value;
+            
+            if (!code || code.length !== 6 || !/^\d{6}$/.test(code)) {
+                updateStatus('Please enter a valid 6-digit code', 'error');
+                return;
+            }
+            
+            log(`Attempting to connect with code: ${code}`, 'info');
+            updateStatus('Connecting to local server...', 'info');
+            
+            try {
+                // Connect directly to local test server WebSocket
+                const wsUrl = 'ws://localhost:8089/ws';
+                log(`Connecting to WebSocket: ${wsUrl}`, 'info');
+                
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    isConnected = true;
+                    document.getElementById('wsStatus').textContent = 'Connected';
+                    document.getElementById('wsStatus').className = 'server-badge active';
+                    log('WebSocket connected!', 'success');
+                    updateStatus('Connected! Joining pairing channel...', 'success');
+                    
+                    // Send mobile initialization with pairing code
+                    const initMessage = {
+                        type: 'mobile_init',
+                        device_type: 'mobile',
+                        pairing_code: code,
+                        session_id: sessionId
+                    };
+                    
+                    ws.send(JSON.stringify(initMessage));
+                    log(`Sent mobile_init with code: ${code}`, 'info');
+                    
+                    // Also join the channel explicitly
+                    setTimeout(() => {
+                        if (ws && isConnected) {
+                            const joinMessage = {
+                                type: 'join_channel',
+                                channel: `pair-${code}`,
+                                device_type: 'mobile',
+                                session_id: sessionId
+                            };
+                            ws.send(JSON.stringify(joinMessage));
+                            log(`Joining channel: pair-${code}`, 'info');
+                        }
+                    }, 100);
+                    
+                    // Update UI
+                    document.getElementById('connectBtn').style.display = 'none';
+                    document.getElementById('disconnectBtn').style.display = 'block';
+                    document.getElementById('pairingCode').disabled = true;
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleMessage(data);
+                    } catch (e) {
+                        log(`Received raw message: ${event.data}`, 'info');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log(`WebSocket error: ${error}`, 'error');
+                    updateStatus('Connection error', 'error');
+                };
+                
+                ws.onclose = (event) => {
+                    isConnected = false;
+                    document.getElementById('wsStatus').textContent = 'Disconnected';
+                    document.getElementById('wsStatus').className = 'server-badge inactive';
+                    log(`WebSocket closed: ${event.code} - ${event.reason || 'No reason'}`, 'warning');
+                    updateStatus('Disconnected from server', 'warning');
+                    
+                    // Reset UI
+                    document.getElementById('connectBtn').style.display = 'block';
+                    document.getElementById('disconnectBtn').style.display = 'none';
+                    document.getElementById('pairingCode').disabled = false;
+                };
+                
+            } catch (error) {
+                log(`Failed to connect: ${error}`, 'error');
+                updateStatus('Failed to connect to server', 'error');
+            }
+        }
+        
+        function handleMessage(data) {
+            log(`Received message type: ${data.type}`, 'info');
+            
+            switch (data.type) {
+                case 'connected':
+                    log(`Server acknowledged connection: ${data.client_id}`, 'success');
+                    break;
+                    
+                case 'channel_joined':
+                    log(`Successfully joined channel: ${data.channel}`, 'success');
+                    updateStatus(`Paired! Channel: ${data.channel}`, 'success');
+                    break;
+                    
+                case 'pairing_success':
+                    log('🎉 Pairing successful!', 'success');
+                    updateStatus('Successfully paired with desktop!', 'success');
+                    break;
+                    
+                case 'client_joined':
+                    if (data.device_type === 'desktop') {
+                        log('Desktop joined the channel', 'success');
+                        updateStatus('Desktop connected to channel', 'success');
+                    }
+                    break;
+                    
+                case 'identified':
+                    log(`Identified as: ${data.device_type}`, 'info');
+                    break;
+                    
+                case 'error':
+                    log(`Server error: ${data.message}`, 'error');
+                    updateStatus(data.message, 'error');
+                    break;
+                    
+                case 'desktop_disconnected':
+                    log(`🔴 Desktop disconnected: ${data.reason}`, 'error');
+                    updateStatus('Desktop disconnected from channel', 'error');
+                    // Simulate clearing Zustand state on mobile
+                    log('🔄 Zustand state cleared on mobile', 'info');
+                    break;
+                    
+                default:
+                    log(`Unknown message type: ${data.type}`, 'warning');
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                log('Disconnecting...', 'info');
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        // Format input as user types
+        document.getElementById('pairingCode').addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+        });
+        
+        // Allow Enter key to submit
+        document.getElementById('pairingCode').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && e.target.value.length === 6) {
+                connectWithCode();
+            }
+        });
+    </script>
+</body>
+</html>

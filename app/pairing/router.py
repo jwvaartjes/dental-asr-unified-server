@@ -1,0 +1,349 @@
+"""
+API router for pairing endpoints.
+"""
+import json
+import logging
+from typing import Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Depends, HTTPException, status
+from pydantic import BaseModel
+
+from .service import ConnectionManager, PairingService
+from .security import JWTHandler, SecurityMiddleware, get_client_ip
+from .schemas import MessageValidator
+
+logger = logging.getLogger(__name__)
+
+# Create router
+router = APIRouter(prefix="/api", tags=["pairing"])
+
+# Request models
+class GeneratePairCodeRequest(BaseModel):
+    desktop_session_id: str
+
+class PairDeviceRequest(BaseModel):
+    code: str
+    mobile_session_id: str
+
+class WSTokenRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+def get_pairing_service(request: Request) -> PairingService:
+    """Dependency to get pairing service from app state."""
+    return request.app.state.pairing_service
+
+def get_security_middleware(request: Request) -> SecurityMiddleware:
+    """Dependency to get security middleware from app state."""
+    return request.app.state.security_middleware
+
+
+# API Endpoints
+@router.post("/generate-pair-code")
+async def generate_pair_code(
+    request_data: GeneratePairCodeRequest,
+    request: Request,
+    pairing_service: PairingService = Depends(get_pairing_service),
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Generate a 6-digit pairing code for desktop."""
+    # Validate request
+    await security.validate_request(request)
+    
+    # Generate pairing code
+    result = await pairing_service.initiate_pairing(request_data.desktop_session_id)
+    return result
+
+
+@router.post("/pair-device")
+async def pair_device(
+    request_data: PairDeviceRequest,
+    request: Request,
+    pairing_service: PairingService = Depends(get_pairing_service),
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Pair mobile device with desktop using code."""
+    # Validate request with pairing-specific rate limiting
+    await security.validate_request(request)
+    
+    # Additional pairing attempt rate limiting
+    if security.ws_rate_limiter:
+        if hasattr(security.ws_rate_limiter, 'can_attempt_pairing'):
+            client_ip = get_client_ip(request)
+            can_pair, retry_after = security.ws_rate_limiter.can_attempt_pairing(client_ip)
+            if not can_pair:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Too many pairing attempts. Retry after {retry_after} seconds",
+                    headers={"Retry-After": str(retry_after)}
+                )
+    
+    # Validate pairing
+    result = await pairing_service.validate_pairing(
+        request_data.code,
+        request_data.mobile_session_id
+    )
+    return result
+
+
+@router.post("/auth/ws-token")
+async def get_ws_token(
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Generate WebSocket authentication token for desktop."""
+    await security.validate_request(request)
+    
+    try:
+        data = await request.json()
+        username = data.get("username", "")
+        password = data.get("password", "")
+    except:
+        # For authenticated users without credentials
+        username = "authenticated_user"
+        password = "dummy"
+    
+    # Generate token (in production, validate credentials first)
+    token = JWTHandler.generate_token(username or "test_user")
+    return {"token": token, "expires_in": 120}
+
+
+@router.post("/auth/ws-token-mobile")
+async def get_ws_token_mobile(
+    pair_code: Optional[str] = None,
+    request: Request = None,
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Generate WebSocket token for mobile (no auth required)."""
+    await security.validate_request(request)
+    
+    token = JWTHandler.generate_mobile_token(pair_code or "")
+    return {"token": token, "expires_in": 300}
+
+
+@router.get("/auth/check-email")
+async def check_email(
+    email: str,
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Check if email exists (always returns true for testing)."""
+    await security.validate_request(request)
+    
+    logger.info(f"Checking email: {email}")
+    if "@" in email:
+        return {"exists": True, "message": "Email found"}
+    return {"exists": False, "message": "Invalid email"}
+
+
+@router.post("/auth/login-magic")
+async def login_magic(
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Magic link login for testing."""
+    await security.validate_request(request)
+    
+    data = await request.json()
+    email = data.get("email", "")
+    logger.info(f"Magic login attempt for: {email}")
+    
+    if "@" in email:
+        token = JWTHandler.generate_token(email)
+        return {
+            "success": True,
+            "token": token,
+            "user": {"email": email, "name": email.split("@")[0]}
+        }
+    
+    raise HTTPException(status_code=400, detail="Invalid email")
+
+
+@router.post("/auth/login")
+async def login(
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware)
+):
+    """Regular login endpoint."""
+    await security.validate_request(request)
+    
+    data = await request.json()
+    email = data.get("email", data.get("username", ""))
+    password = data.get("password", "")
+    
+    logger.info(f"Login attempt for: {email}")
+    
+    # For testing, accept any credentials
+    token = JWTHandler.generate_token(email)
+    
+    return {
+        "success": True,
+        "token": token,
+        "user": {"email": email, "name": email.split("@")[0] if "@" in email else email}
+    }
+
+
+@router.get("/auth/verify")
+async def verify_auth():
+    """Verify authentication status."""
+    return {"authenticated": True, "user": "test_user"}
+
+
+# WebSocket endpoint (separate from APIRouter)
+async def websocket_endpoint(
+    websocket: WebSocket,
+    connection_manager: ConnectionManager,
+    security_middleware: SecurityMiddleware
+):
+    """WebSocket endpoint for real-time communication."""
+    client_id = f"client_{id(websocket)}"
+    client_ip = get_client_ip(websocket=websocket)
+    
+    # Validate WebSocket connection
+    is_valid, error_reason = await security_middleware.validate_websocket(websocket)
+    if not is_valid:
+        logger.warning(f"WebSocket rejected from {client_ip}: {error_reason}")
+        await websocket.close(code=1008, reason=error_reason or "Connection rejected")
+        return
+    
+    # Handle Bearer token authentication
+    subprotocol = security_middleware.handle_bearer_token(websocket)
+    
+    # Accept connection
+    if subprotocol:
+        await websocket.accept(subprotocol=subprotocol)
+    else:
+        await websocket.accept()
+    
+    # Register with connection manager
+    connection_manager.active_connections[client_id] = websocket
+    connection_manager.connection_ips[client_id] = client_ip
+    
+    # Register with rate limiter if available
+    if security_middleware.ws_rate_limiter:
+        if hasattr(security_middleware.ws_rate_limiter, 'register_connection'):
+            security_middleware.ws_rate_limiter.register_connection(client_ip, client_id)
+    
+    logger.info(f"Client {client_id} connected from {client_ip}")
+    
+    try:
+        # Send initial connection success
+        await connection_manager.send_personal_message(
+            json.dumps({"type": "connected", "client_id": client_id}),
+            client_id
+        )
+        
+        while True:
+            # Receive message
+            data = await websocket.receive_text()
+            
+            # Validate message size
+            if len(data.encode()) > 10 * 1024:  # 10KB limit for text
+                logger.warning(f"Message from {client_id} exceeds size limit")
+                await connection_manager.send_personal_message(
+                    json.dumps({"type": "error", "message": "Message exceeds maximum size limit"}),
+                    client_id
+                )
+                continue
+            
+            # Rate limiting check
+            if security_middleware.ws_rate_limiter:
+                if hasattr(security_middleware.ws_rate_limiter, 'can_send_message'):
+                    can_send, retry_after = security_middleware.ws_rate_limiter.can_send_message(client_id)
+                    if not can_send:
+                        logger.warning(f"Rate limit exceeded for {client_id}")
+                        await connection_manager.send_personal_message(
+                            json.dumps({"type": "error", "message": f"Rate limit exceeded. Retry after {retry_after:.1f} seconds"}),
+                            client_id
+                        )
+                        continue
+            
+            # Parse message
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                logger.error(f"Invalid JSON from {client_id}")
+                await connection_manager.send_personal_message(
+                    json.dumps({"type": "error", "message": "Invalid message format"}),
+                    client_id
+                )
+                continue
+            
+            # Validate message schema if validator available
+            try:
+                is_valid, validated_msg, error = MessageValidator.validate_message(message)
+                if not is_valid:
+                    logger.warning(f"Invalid message schema from {client_id}: {error}")
+                    await connection_manager.send_personal_message(
+                        json.dumps({"type": "error", "message": f"Invalid message: {error}"}),
+                        client_id
+                    )
+                    continue
+                if validated_msg:
+                    message = validated_msg.model_dump()
+            except:
+                # MessageValidator not available, skip validation
+                pass
+            
+            logger.info(f"Received from {client_id}: {message.get('type')}")
+            
+            # Handle different message types
+            msg_type = message.get("type")
+            
+            if msg_type == "mobile_init":
+                device_type = message.get("device_type", "mobile")
+                pairing_code = message.get("pairing_code")
+                if pairing_code:
+                    channel_id = f"pair-{pairing_code}"
+                    await connection_manager.join_channel(client_id, channel_id, device_type)
+                    await connection_manager.send_personal_message(
+                        json.dumps({"type": "channel_joined", "channel": channel_id}),
+                        client_id
+                    )
+                    
+            elif msg_type == "join_channel":
+                channel_id = message.get("channel")
+                device_type = message.get("device_type", "unknown")
+                if channel_id:
+                    await connection_manager.join_channel(client_id, channel_id, device_type)
+                    await connection_manager.send_personal_message(
+                        json.dumps({"type": "channel_joined", "channel": channel_id}),
+                        client_id
+                    )
+                    
+            elif msg_type == "identify":
+                device_type = message.get("device_type", "desktop")
+                connection_manager.client_info[client_id] = {"device_type": device_type}
+                await connection_manager.send_personal_message(
+                    json.dumps({"type": "identified", "device_type": device_type}),
+                    client_id
+                )
+                
+            elif msg_type == "channel_message":
+                channel_id = message.get("channelId")
+                if channel_id:
+                    await connection_manager.broadcast_to_channel(
+                        channel_id, 
+                        message.get("payload", {})
+                    )
+                    
+    except WebSocketDisconnect:
+        await connection_manager.disconnect(client_id)
+        # Unregister from rate limiter
+        if security_middleware.ws_rate_limiter and client_id in connection_manager.connection_ips:
+            if hasattr(security_middleware.ws_rate_limiter, 'unregister_connection'):
+                security_middleware.ws_rate_limiter.unregister_connection(
+                    connection_manager.connection_ips[client_id], 
+                    client_id
+                )
+        logger.info(f"Client {client_id} disconnected normally")
+    except Exception as e:
+        logger.error(f"WebSocket error for {client_id}: {e}")
+        await connection_manager.disconnect(client_id)
+        # Unregister from rate limiter
+        if security_middleware.ws_rate_limiter and client_id in connection_manager.connection_ips:
+            if hasattr(security_middleware.ws_rate_limiter, 'unregister_connection'):
+                security_middleware.ws_rate_limiter.unregister_connection(
+                    connection_manager.connection_ips[client_id], 
+                    client_id
+                )

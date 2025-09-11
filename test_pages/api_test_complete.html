@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦷 Complete API Test Suite - All Unified Endpoints</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #4ade80, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .status-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .status-card h3 {
+            color: #4ade80;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            display: inline-block;
+        }
+
+        .status-indicator.online {
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+        }
+
+        .auth-section {
+            margin-bottom: 30px;
+            padding: 25px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .auth-section h3 {
+            color: #60a5fa;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .token-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .token-status.valid {
+            color: #22c55e;
+        }
+
+        .token-status.invalid {
+            color: #ef4444;
+        }
+
+        .api-sections {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .api-section {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .api-section h3 {
+            color: #fbbf24;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.2em;
+        }
+
+        .endpoint-group {
+            margin-bottom: 25px;
+        }
+
+        .endpoint-group h4 {
+            color: #a78bfa;
+            margin-bottom: 15px;
+            font-size: 1em;
+            padding-bottom: 5px;
+            border-bottom: 1px solid rgba(167, 139, 250, 0.3);
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #4f46e5, #7c3aed);
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 5px 5px 0;
+            transition: all 0.3s ease;
+            text-transform: none;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            background: linear-gradient(45deg, #6366f1, #8b5cf6);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.4);
+        }
+
+        .btn.auth {
+            background: linear-gradient(45deg, #059669, #0d9488);
+        }
+
+        .btn.auth:hover {
+            background: linear-gradient(45deg, #10b981, #14b8a6);
+        }
+
+        .btn.ai {
+            background: linear-gradient(45deg, #dc2626, #ea580c);
+        }
+
+        .btn.ai:hover {
+            background: linear-gradient(45deg, #ef4444, #f97316);
+        }
+
+        .btn.lexicon {
+            background: linear-gradient(45deg, #7c2d12, #a16207);
+        }
+
+        .btn.lexicon:hover {
+            background: linear-gradient(45deg, #9a3412, #ca8a04);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results {
+            margin-top: 30px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .results h3 {
+            color: #22d3ee;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .results pre {
+            background: #0a0a0a;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .server-config {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .config-value {
+            font-weight: bold;
+            color: #4ade80;
+        }
+
+        .clear-results {
+            background: #ef4444;
+            margin-left: auto;
+        }
+
+        .clear-results:hover {
+            background: #dc2626;
+        }
+
+        .endpoint-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            font-weight: bold;
+        }
+
+        .method-get { background: #10b981; color: white; }
+        .method-post { background: #f59e0b; color: white; }
+        .method-put { background: #6366f1; color: white; }
+        .method-delete { background: #ef4444; color: white; }
+
+        .input-group {
+            margin: 10px 0;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+
+        .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+
+        .input-group input:focus, .input-group textarea:focus {
+            outline: none;
+            border-color: #4ade80;
+            box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🦷 Complete API Test Suite</h1>
+            <p>Testing interface for the unified dental ASR server</p>
+            <p><strong>Port 8089</strong> - All Available Endpoints</p>
+        </div>
+
+        <!-- Server Status Panel -->
+        <div class="status-panel">
+            <div class="status-card">
+                <h3>🚀 Server Status</h3>
+                <div class="config-item">
+                    <span>Unified Server:</span>
+                    <span class="config-value">
+                        <span class="status-indicator" id="serverStatus"></span>
+                        <span id="serverStatusText">Checking...</span>
+                    </span>
+                </div>
+                <div class="config-item">
+                    <span>Total Endpoints:</span>
+                    <span class="config-value" id="endpointCount">-</span>
+                </div>
+            </div>
+
+            <div class="status-card">
+                <h3>🧠 AI Provider</h3>
+                <div class="config-item">
+                    <span>Current Provider:</span>
+                    <span class="config-value" id="currentProvider">-</span>
+                </div>
+                <div class="config-item">
+                    <span>Model:</span>
+                    <span class="config-value" id="currentModel">-</span>
+                </div>
+                <div class="config-item">
+                    <span>Status:</span>
+                    <span class="config-value" id="providerStatus">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Authentication Section -->
+        <div class="auth-section">
+            <h3>🔐 Authentication & Token Management</h3>
+            <div class="token-status" id="tokenStatus">
+                <span>🔴</span> No authentication token
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <button class="btn auth" onclick="loginAdmin()">🔑 Admin Login</button>
+                <button class="btn auth" onclick="loginMagic()">✨ Magic Login (User)</button>
+                <button class="btn auth" onclick="verifyAuth()">✅ Verify Token</button>
+                <button class="btn auth" onclick="checkEmail()">📧 Check Email</button>
+                <button class="btn auth" onclick="getWSToken()">🔌 Get WebSocket Token</button>
+                <button class="btn auth" onclick="getWSTokenMobile()">📱 Get Mobile WS Token</button>
+                <button class="btn auth" onclick="clearToken()">🗑️ Clear Token</button>
+            </div>
+        </div>
+
+        <!-- API Test Sections -->
+        <div class="api-sections">
+            <!-- AI Provider System -->
+            <div class="api-section">
+                <h3>🧠 AI Provider System</h3>
+                
+                <div class="endpoint-group">
+                    <h4>Provider Management</h4>
+                    <button class="btn ai" onclick="testEndpoint('/api/ai/status')">
+                        Status <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn ai" onclick="testEndpoint('/api/ai/providers')">
+                        List Providers <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn ai" onclick="testEndpoint('/api/ai/model-info')">
+                        Model Info <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn ai" onclick="testEndpoint('/api/ai/reload', 'POST')">
+                        Reload <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>Transcription</h4>
+                    <div class="input-group">
+                        <label for="transcribeText">Test Text:</label>
+                        <input type="text" id="transcribeText" value="element 11 cariës" placeholder="Dutch dental text">
+                    </div>
+                    <button class="btn ai" onclick="testTranscribe()">
+                        Transcribe <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                    <button class="btn ai" onclick="testTranscribeFile()">
+                        Transcribe File <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Lexicon Management -->
+            <div class="api-section">
+                <h3>📚 Lexicon Management</h3>
+                
+                <div class="endpoint-group">
+                    <h4>Lexicon Operations</h4>
+                    <button class="btn lexicon" onclick="testEndpoint('/api/lexicon/full')">
+                        Full Lexicon <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn lexicon" onclick="testEndpoint('/api/lexicon/categories')">
+                        Categories <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn lexicon" onclick="testLexiconSearch()">
+                        Search <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <button class="btn lexicon" onclick="testLexiconTerms()">
+                        Terms by Category <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>Lexicon Modifications</h4>
+                    <div class="input-group">
+                        <label for="canonicalTerm">Canonical Term:</label>
+                        <input type="text" id="canonicalTerm" value="cariës" placeholder="New canonical term">
+                    </div>
+                    <div class="input-group">
+                        <label for="termCategory">Category:</label>
+                        <input type="text" id="termCategory" value="oral_findings" placeholder="Category name">
+                    </div>
+                    <button class="btn lexicon" onclick="addCanonical()">
+                        Add Canonical <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                    <button class="btn lexicon" onclick="removeCanonical()">
+                        Remove Canonical <span class="endpoint-badge method-delete">DELETE</span>
+                    </button>
+                    <button class="btn lexicon" onclick="addCategory()">
+                        Add Category <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                    <button class="btn lexicon" onclick="deleteCategory()">
+                        Delete Category <span class="endpoint-badge method-delete">DELETE</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Protected Words -->
+            <div class="api-section">
+                <h3>🛡️ Protected Words</h3>
+                
+                <div class="endpoint-group">
+                    <h4>Protected Word Management</h4>
+                    <button class="btn" onclick="testEndpoint('/api/protect_words')">
+                        Get Protected Words <span class="endpoint-badge method-get">GET</span>
+                    </button>
+                    <div class="input-group">
+                        <label for="protectedWord">Protected Word:</label>
+                        <input type="text" id="protectedWord" value="element" placeholder="Word to protect">
+                    </div>
+                    <button class="btn" onclick="addProtectedWord()">
+                        Add Protected Word <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Pairing System -->
+            <div class="api-section">
+                <h3>🔗 Pairing System</h3>
+                
+                <div class="endpoint-group">
+                    <h4>Pairing Operations</h4>
+                    <button class="btn" onclick="generatePairCode()">
+                        Generate Code <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                    <div class="input-group">
+                        <label for="pairCode">Pairing Code:</label>
+                        <input type="text" id="pairCode" value="123456" placeholder="6-digit code">
+                    </div>
+                    <button class="btn" onclick="pairDevice()">
+                        Pair Device <span class="endpoint-badge method-post">POST</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results">
+            <h3>
+                📊 API Test Results
+                <button class="btn clear-results" onclick="clearResults()">Clear Results</button>
+            </h3>
+            <pre id="results">Ready to test ALL unified server APIs... 🚀
+
+🎯 Available Endpoints (Port 8089):
+✅ Authentication (6 endpoints)
+✅ AI Providers (7 endpoints) 
+✅ Lexicon Management (9 endpoints)
+✅ Protected Words (1+ endpoints)
+✅ Pairing System (2+ endpoints)
+
+💡 Quick Start:
+1. Click "Admin Login" or "Magic Login" to authenticate
+2. Test any endpoint category
+3. View detailed responses below
+
+Note: This tests the UNIFIED server (port 8089) with all migrated functionality.</pre>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const BASE_URL = 'http://localhost:8089';
+        
+        let authToken = localStorage.getItem('auth_token');
+
+        // Update UI on load
+        document.addEventListener('DOMContentLoaded', function() {
+            updateTokenStatus();
+            checkServerStatus();
+            updateAIStatus();
+        });
+
+        // Utility Functions
+        function log(message, isError = false) {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = isError ? '❌' : '✅';
+            const formattedMessage = `[${timestamp}] ${prefix} ${message}\n`;
+            results.textContent += formattedMessage;
+            results.scrollTop = results.scrollHeight;
+            
+            if (isError) {
+                console.error(message);
+            } else {
+                console.log(message);
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('results').textContent = 'Results cleared. Ready for new tests... 🚀\n';
+        }
+
+        function updateTokenStatus() {
+            const status = document.getElementById('tokenStatus');
+            if (authToken) {
+                status.innerHTML = '<span>🟢</span> Token available';
+                status.className = 'token-status valid';
+            } else {
+                status.innerHTML = '<span>🔴</span> No authentication token';
+                status.className = 'token-status invalid';
+            }
+        }
+
+        function clearToken() {
+            localStorage.removeItem('auth_token');
+            authToken = null;
+            updateTokenStatus();
+            log('🗑️ Authentication token cleared');
+        }
+
+        // Server Status Checks
+        async function checkServerStatus() {
+            try {
+                const response = await fetch(`${BASE_URL}/health`);
+                if (response.ok) {
+                    document.getElementById('serverStatus').classList.add('online');
+                    document.getElementById('serverStatusText').textContent = 'Online';
+                    
+                    // Count available endpoints
+                    const openApiResponse = await fetch(`${BASE_URL}/openapi.json`);
+                    const openApiData = await openApiResponse.json();
+                    const endpointCount = Object.keys(openApiData.paths || {}).length;
+                    document.getElementById('endpointCount').textContent = endpointCount;
+                } else {
+                    throw new Error('Server responded with error');
+                }
+            } catch (error) {
+                document.getElementById('serverStatusText').textContent = 'Offline';
+                log(`❌ Server check failed: ${error.message}`, true);
+            }
+        }
+
+        async function updateAIStatus() {
+            try {
+                const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+                const response = await fetch(`${BASE_URL}/api/ai/model-info`, { headers });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('currentProvider').textContent = data.provider || 'Unknown';
+                    document.getElementById('currentModel').textContent = data.model_id || 'Unknown';
+                    document.getElementById('providerStatus').textContent = data.status || 'Unknown';
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                document.getElementById('currentProvider').textContent = 'Requires Auth';
+                document.getElementById('currentModel').textContent = 'Requires Auth';
+                document.getElementById('providerStatus').textContent = 'Requires Auth';
+            }
+        }
+
+        // Authentication Functions
+        async function loginAdmin() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'admin@dental-asr.com',
+                        password: 'TandASR2024!'
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok && data.token) {
+                    authToken = data.token;
+                    localStorage.setItem('auth_token', authToken);
+                    updateTokenStatus();
+                    updateAIStatus();
+                    log('🔑 Admin login successful');
+                    log(`👤 User: ${data.user.email} (${data.user.role})`);
+                } else {
+                    log(`❌ Admin login failed: ${data.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                log(`❌ Admin login error: ${error.message}`, true);
+            }
+        }
+
+        async function loginMagic() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/auth/login-magic`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'test@practijk.nl',
+                        name: 'Test User'
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok && data.token) {
+                    authToken = data.token;
+                    localStorage.setItem('auth_token', authToken);
+                    updateTokenStatus();
+                    updateAIStatus();
+                    log('✨ Magic login successful');
+                    log(`👤 User: ${data.user.email} (${data.user.role})`);
+                } else {
+                    log(`❌ Magic login failed: ${data.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                log(`❌ Magic login error: ${error.message}`, true);
+            }
+        }
+
+        async function verifyAuth() {
+            if (!authToken) {
+                log('❌ No token to verify', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/auth/verify`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log('✅ Token verification successful');
+                    log(`👤 User: ${data.user.email} (${data.user.role})`);
+                } else {
+                    log(`❌ Token verification failed: ${data.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                log(`❌ Token verification error: ${error.message}`, true);
+            }
+        }
+
+        async function checkEmail() {
+            const email = prompt('Enter email to check:') || 'test@example.com';
+            await makeRequest(`/api/auth/check-email?email=${encodeURIComponent(email)}`, 'GET', 'Check Email');
+        }
+
+        async function getWSToken() {
+            if (!authToken) {
+                log('❌ Need to login first to get WebSocket token', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BASE_URL}/api/auth/ws-token`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                const data = await response.json();
+                if (response.ok && data.token) {
+                    log('🔌 WebSocket token obtained successfully');
+                    log(`⏰ Expires in: ${data.expires_in} seconds`);
+                } else {
+                    log(`❌ WebSocket token failed: ${data.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                log(`❌ WebSocket token error: ${error.message}`, true);
+            }
+        }
+
+        async function getWSTokenMobile() {
+            const pairCode = document.getElementById('pairCode').value || '123456';
+            await makeRequest(`/api/auth/ws-token-mobile?pair_code=${pairCode}`, 'POST', 'Get Mobile WS Token');
+        }
+
+        // Generic API Test Functions
+        async function testEndpoint(endpoint, method = 'GET', body = null) {
+            await makeRequest(endpoint, method, `Test ${endpoint}`, body);
+        }
+
+        async function testTranscribe() {
+            const testText = document.getElementById('transcribeText').value || 'element 11 cariës';
+            
+            // Generate fake audio data (base64 encoded WAV header)
+            const fakeAudioData = 'UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQIAAAAAAA==';
+            
+            const requestBody = {
+                audio_data: fakeAudioData,
+                language: 'nl',
+                prompt: `Dutch dental terminology: ${testText}`,
+                format: 'wav'
+            };
+
+            await makeRequest('/api/ai/transcribe', 'POST', 'AI Transcription', requestBody);
+        }
+
+        async function testTranscribeFile() {
+            // Create a minimal WAV file for testing
+            const wavHeader = new ArrayBuffer(44);
+            const view = new DataView(wavHeader);
+            
+            // WAV header
+            view.setUint32(0, 0x52494646, false); // "RIFF"
+            view.setUint32(4, 36, true); // File size - 8
+            view.setUint32(8, 0x57415645, false); // "WAVE"
+            view.setUint32(12, 0x666d7420, false); // "fmt "
+            view.setUint32(16, 16, true); // Subchunk1Size
+            view.setUint16(20, 1, true); // AudioFormat (PCM)
+            view.setUint16(22, 1, true); // NumChannels
+            view.setUint32(24, 16000, true); // SampleRate
+            view.setUint32(28, 32000, true); // ByteRate
+            view.setUint16(32, 2, true); // BlockAlign
+            view.setUint16(34, 16, true); // BitsPerSample
+            view.setUint32(36, 0x64617461, false); // "data"
+            view.setUint32(40, 0, true); // Subchunk2Size
+            
+            const blob = new Blob([wavHeader], { type: 'audio/wav' });
+            const formData = new FormData();
+            formData.append('file', blob, 'test.wav');
+            formData.append('language', 'nl');
+            formData.append('prompt', 'Dutch dental terminology');
+
+            try {
+                log('🎵 Testing AI transcribe file endpoint...');
+                const response = await fetch(`${BASE_URL}/api/ai/transcribe-file`, {
+                    method: 'POST',
+                    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log('✅ AI Transcribe File successful');
+                    log(JSON.stringify(data, null, 2));
+                } else {
+                    log(`❌ AI Transcribe File failed: ${data.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                log(`❌ AI Transcribe File error: ${error.message}`, true);
+            }
+        }
+
+        // Lexicon Functions
+        async function testLexiconSearch() {
+            const query = prompt('Enter search query:') || 'cariës';
+            await makeRequest(`/api/lexicon/search?q=${encodeURIComponent(query)}`, 'GET', 'Lexicon Search');
+        }
+
+        async function testLexiconTerms() {
+            const category = document.getElementById('termCategory').value || 'oral_findings';
+            await makeRequest(`/api/lexicon/terms/${encodeURIComponent(category)}`, 'GET', 'Lexicon Terms');
+        }
+
+        async function addCanonical() {
+            const term = document.getElementById('canonicalTerm').value || 'cariës';
+            const category = document.getElementById('termCategory').value || 'oral_findings';
+            await makeRequest('/api/lexicon/add-canonical', 'POST', 'Add Canonical', {
+                canonical_term: term,
+                category: category
+            });
+        }
+
+        async function removeCanonical() {
+            const term = document.getElementById('canonicalTerm').value || 'cariës';
+            const category = document.getElementById('termCategory').value || 'oral_findings';
+            await makeRequest('/api/lexicon/remove-canonical', 'DELETE', 'Remove Canonical', {
+                canonical_term: term,
+                category: category
+            });
+        }
+
+        async function addCategory() {
+            const category = document.getElementById('termCategory').value || 'test_category';
+            await makeRequest('/api/lexicon/add-category', 'POST', 'Add Category', {
+                category_name: category,
+                description: 'Test category description'
+            });
+        }
+
+        async function deleteCategory() {
+            const category = document.getElementById('termCategory').value || 'test_category';
+            await makeRequest('/api/lexicon/delete-category', 'DELETE', 'Delete Category', {
+                category_name: category
+            });
+        }
+
+        // Protected Words Functions
+        async function addProtectedWord() {
+            const word = document.getElementById('protectedWord').value || 'element';
+            await makeRequest('/api/protect_words', 'POST', 'Add Protected Word', {
+                word: word,
+                reason: 'API test'
+            });
+        }
+
+        // Pairing Functions
+        async function generatePairCode() {
+            const sessionId = 'desktop-' + Date.now();
+            await makeRequest('/api/generate-pair-code', 'POST', 'Generate Pair Code', {
+                desktop_session_id: sessionId
+            });
+        }
+
+        async function pairDevice() {
+            const code = document.getElementById('pairCode').value || '123456';
+            const sessionId = 'mobile-' + Date.now();
+            await makeRequest('/api/pair-device', 'POST', 'Pair Device', {
+                code: code,
+                mobile_session_id: sessionId
+            });
+        }
+
+        // Generic Request Helper
+        async function makeRequest(endpoint, method = 'GET', description = '', body = null) {
+            try {
+                log(`🚀 ${description}: ${method} ${endpoint}`);
+                
+                const options = {
+                    method,
+                    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+                };
+
+                if (body && method !== 'GET') {
+                    options.headers['Content-Type'] = 'application/json';
+                    options.body = JSON.stringify(body);
+                }
+
+                const response = await fetch(`${BASE_URL}${endpoint}`, options);
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`✅ ${description} successful`);
+                    log(JSON.stringify(data, null, 2));
+                } else {
+                    log(`❌ ${description} failed: ${data.detail || `HTTP ${response.status}`}`, true);
+                    if (data.detail) {
+                        log(JSON.stringify(data, null, 2));
+                    }
+                }
+            } catch (error) {
+                log(`❌ ${description} error: ${error.message}`, true);
+            }
+        }
+    </script>
+</body>
+</html>

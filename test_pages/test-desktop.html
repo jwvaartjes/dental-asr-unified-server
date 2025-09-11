@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Pairing UI Update</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .device-section {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .device-section.desktop {
+            background: #f0f8ff;
+        }
+        .device-section.mobile {
+            background: #fff0f5;
+        }
+        .device-section.mobile.paired {
+            background: #f0fff0;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        input {
+            padding: 10px;
+            font-size: 18px;
+            letter-spacing: 2px;
+            text-align: center;
+            width: 150px;
+            margin: 0 10px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        .code-display {
+            font-size: 36px;
+            font-weight: bold;
+            color: #2196F3;
+            letter-spacing: 4px;
+            margin: 20px 0;
+        }
+        .status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.paired {
+            background: #cff4fc;
+            color: #0c5460;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            margin-top: 10px;
+        }
+        .mobile-mic-interface {
+            display: none;
+            background: #28a745;
+            color: white;
+            padding: 40px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .mobile-mic-interface.active {
+            display: block;
+        }
+        .mic-button {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: white;
+            color: #28a745;
+            border: 4px solid white;
+            font-size: 48px;
+            cursor: pointer;
+            margin: 20px auto;
+        }
+        .test-info {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Pairing UI Update Test</h1>
+        <p class="subtitle">Test that UI correctly updates to MobileMic interface after successful pairing</p>
+        
+        <div class="test-info">
+            <strong>Test Scenario:</strong><br>
+            1. Desktop generates pairing code<br>
+            2. Mobile enters pairing code<br>
+            3. After successful pairing, mobile UI should automatically update to show MobileMic interface<br>
+            4. This simulates the Zustand state change that should trigger the UI update
+        </div>
+    </div>
+
+    <!-- Desktop Section -->
+    <div class="container device-section desktop">
+        <h2>🖥️ Desktop (Code Generator)</h2>
+        <div id="desktopStatus" class="status disconnected">Disconnected</div>
+        <button id="connectDesktop" onclick="connectDesktop()">Connect Desktop</button>
+        <button id="generateCode" onclick="generateCode()" disabled>Generate Code</button>
+        <div id="codeDisplay" class="code-display">------</div>
+        <div id="desktopLog" class="log"></div>
+    </div>
+
+    <!-- Mobile Section -->
+    <div class="container device-section mobile" id="mobileSection">
+        <h2>📱 Mobile (Code Entry)</h2>
+        <div id="mobileStatus" class="status disconnected">Disconnected</div>
+        
+        <!-- Pairing Input (shown initially) -->
+        <div id="pairingInput">
+            <input type="text" id="codeInput" placeholder="000000" maxlength="6">
+            <button id="pairButton" onclick="pairMobile()">Pair Device</button>
+        </div>
+        
+        <!-- Mobile Mic Interface (shown after successful pairing) -->
+        <div id="mobileMicInterface" class="mobile-mic-interface">
+            <h2>🎤 Mobile Mic Active</h2>
+            <p>Successfully paired! This is the MobileMic interface.</p>
+            <button class="mic-button">🎤</button>
+            <p>Channel: <span id="channelDisplay"></span></p>
+            <button onclick="disconnectMobile()">Disconnect</button>
+        </div>
+        
+        <div id="mobileLog" class="log"></div>
+    </div>
+
+    <script>
+        let desktopWs = null;
+        let mobileWs = null;
+        let currentCode = null;
+        let channelId = null;
+        
+        // Simulate Zustand store
+        const pairingStore = {
+            isPaired: false,
+            channelId: null,
+            setPairing: function(newChannelId) {
+                this.isPaired = true;
+                this.channelId = newChannelId;
+                updateMobileUI();
+            },
+            clearPairing: function() {
+                this.isPaired = false;
+                this.channelId = null;
+                updateMobileUI();
+            }
+        };
+        
+        function log(device, message) {
+            const logEl = document.getElementById(device + 'Log');
+            const timestamp = new Date().toLocaleTimeString();
+            logEl.textContent += `[${timestamp}] ${message}\n`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function updateMobileUI() {
+            const pairingInput = document.getElementById('pairingInput');
+            const mobileMicInterface = document.getElementById('mobileMicInterface');
+            const mobileSection = document.getElementById('mobileSection');
+            
+            if (pairingStore.isPaired) {
+                // Show MobileMic interface
+                pairingInput.style.display = 'none';
+                mobileMicInterface.classList.add('active');
+                mobileSection.classList.add('paired');
+                document.getElementById('channelDisplay').textContent = pairingStore.channelId;
+                log('mobile', '✅ UI Updated: Showing MobileMic interface');
+            } else {
+                // Show pairing input
+                pairingInput.style.display = 'block';
+                mobileMicInterface.classList.remove('active');
+                mobileSection.classList.remove('paired');
+                log('mobile', '📱 UI Updated: Showing pairing input');
+            }
+        }
+        
+        function connectDesktop() {
+            if (desktopWs) {
+                desktopWs.close();
+            }
+            
+            const wsUrl = 'ws://localhost:8089/ws';
+            log('desktop', `Connecting to ${wsUrl}...`);
+            
+            desktopWs = new WebSocket(wsUrl);
+            
+            desktopWs.onopen = () => {
+                log('desktop', '✅ Connected to WebSocket');
+                document.getElementById('desktopStatus').className = 'status connected';
+                document.getElementById('desktopStatus').textContent = 'Connected';
+                document.getElementById('generateCode').disabled = false;
+                
+                // Send desktop identification
+                desktopWs.send(JSON.stringify({
+                    type: 'identify',
+                    device_type: 'desktop',
+                    session_id: 'desktop-' + Date.now()
+                }));
+            };
+            
+            desktopWs.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                log('desktop', `Received: ${data.type}`);
+                
+                if (data.type === 'pairing_success') {
+                    document.getElementById('desktopStatus').className = 'status paired';
+                    document.getElementById('desktopStatus').textContent = 'Paired with Mobile';
+                } else if (data.type === 'mobile_disconnected') {
+                    log('desktop', `🔴 Mobile disconnected: ${data.reason}`);
+                    document.getElementById('desktopStatus').className = 'status disconnected';
+                    document.getElementById('desktopStatus').textContent = 'Mobile Disconnected';
+                    // Simulate clearing Zustand state on desktop
+                    log('desktop', '🔄 Zustand state cleared on desktop');
+                }
+            };
+            
+            desktopWs.onclose = () => {
+                log('desktop', '❌ Disconnected');
+                document.getElementById('desktopStatus').className = 'status disconnected';
+                document.getElementById('desktopStatus').textContent = 'Disconnected';
+                document.getElementById('generateCode').disabled = true;
+            };
+        }
+        
+        async function generateCode() {
+            // Generate a random 6-digit code
+            currentCode = Math.floor(100000 + Math.random() * 900000).toString();
+            document.getElementById('codeDisplay').textContent = currentCode;
+            channelId = `pair-${currentCode}`;
+            
+            log('desktop', `Generated code: ${currentCode}`);
+            
+            // Join pairing channel
+            if (desktopWs && desktopWs.readyState === WebSocket.OPEN) {
+                desktopWs.send(JSON.stringify({
+                    type: 'join_channel',
+                    channel: channelId,
+                    device_type: 'desktop',
+                    session_id: 'desktop-' + Date.now()
+                }));
+                log('desktop', `Joined channel: ${channelId}`);
+            }
+        }
+        
+        async function pairMobile() {
+            const code = document.getElementById('codeInput').value;
+            
+            if (code.length !== 6) {
+                alert('Please enter a 6-digit code');
+                return;
+            }
+            
+            log('mobile', `Attempting to pair with code: ${code}`);
+            
+            // Connect mobile WebSocket
+            if (!mobileWs || mobileWs.readyState !== WebSocket.OPEN) {
+                const wsUrl = 'ws://localhost:8089/ws';
+                log('mobile', `Connecting to ${wsUrl}...`);
+                
+                mobileWs = new WebSocket(wsUrl);
+                
+                mobileWs.onopen = () => {
+                    log('mobile', '✅ Connected to WebSocket');
+                    document.getElementById('mobileStatus').className = 'status connected';
+                    document.getElementById('mobileStatus').textContent = 'Connected';
+                    
+                    // Send mobile identification and join channel
+                    mobileWs.send(JSON.stringify({
+                        type: 'mobile_init',
+                        device_type: 'mobile',
+                        pairing_code: code,
+                        session_id: 'mobile-' + Date.now()
+                    }));
+                    
+                    setTimeout(() => {
+                        const channelToJoin = `pair-${code}`;
+                        mobileWs.send(JSON.stringify({
+                            type: 'join_channel',
+                            channel: channelToJoin,
+                            device_type: 'mobile',
+                            session_id: 'mobile-' + Date.now()
+                        }));
+                        log('mobile', `Joining channel: ${channelToJoin}`);
+                        
+                        // Simulate successful pairing after joining channel
+                        setTimeout(() => {
+                            log('mobile', '🎉 PAIRING SUCCESSFUL - Calling setPairing()');
+                            // This simulates the onPairingSuccess callback
+                            pairingStore.setPairing(channelToJoin);
+                            
+                            document.getElementById('mobileStatus').className = 'status paired';
+                            document.getElementById('mobileStatus').textContent = 'Paired with Desktop';
+                            
+                            // Notify desktop of pairing success
+                            if (desktopWs && desktopWs.readyState === WebSocket.OPEN) {
+                                desktopWs.send(JSON.stringify({
+                                    type: 'pairing_success',
+                                    code: code
+                                }));
+                            }
+                        }, 500);
+                    }, 100);
+                };
+                
+                mobileWs.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    log('mobile', `Received: ${data.type}`);
+                };
+                
+                mobileWs.onclose = () => {
+                    log('mobile', '❌ Disconnected');
+                    document.getElementById('mobileStatus').className = 'status disconnected';
+                    document.getElementById('mobileStatus').textContent = 'Disconnected';
+                    pairingStore.clearPairing();
+                };
+            }
+        }
+        
+        function disconnectMobile() {
+            if (mobileWs) {
+                mobileWs.close();
+                mobileWs = null;
+            }
+            pairingStore.clearPairing();
+            document.getElementById('codeInput').value = '';
+        }
+        
+        // Initialize UI
+        updateMobileUI();
+        
+        // Auto-connect desktop on load
+        window.addEventListener('load', () => {
+            setTimeout(connectDesktop, 500);
+        });
+    </script>
+</body>
+</html>
