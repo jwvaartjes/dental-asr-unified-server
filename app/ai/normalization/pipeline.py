@@ -506,6 +506,61 @@ class NormalizationPipeline:
         
         return self.tokenizer.detokenize(out)
 
+    def _split_noncanonical_hyphens(self, text: str) -> str:
+        """
+        Split non-canonical hyphens before fuzzy matching to enable veto thresholds on individual words.
+        
+        This fixes issues like:
+        - "vestibuleer" incorrectly matching "vestibulum" 
+        - "interproximaal" incorrectly matching "intermaxillair"
+        
+        By splitting "licht-mucosaal" → "licht mucosaal", the veto threshold can reject 
+        "licht" (score < 0.60) and prevent incorrect matches.
+        
+        Uses tokenizer behavior: "licht-mucosaal" → ['licht', '-', 'mucosaal']
+        """
+        if not text or '-' not in text:
+            return text
+        
+        # Define canonical hyphenated terms that should keep their hyphens
+        canonical_hyphenated = {
+            'peri-apicaal', 'peri-apicale', 'inter-occlusaal', 'inter-occlusale',
+            'supra-gingivaal', 'sub-gingivaal', 'pre-molaar', 'post-operatief',
+            'extra-oraal', 'intra-oraal', 'co-morbiditeit', 're-interventie'
+        }
+        
+        # Tokenize: "licht-mucosaal" → ['licht', '-', 'mucosaal']
+        tokens = self.tokenizer.tokenize(text)
+        result_tokens = []
+        i = 0
+        
+        while i < len(tokens):
+            token = tokens[i]
+            
+            # Look for pattern: word + hyphen + word
+            if (i + 2 < len(tokens) and 
+                token.strip() and any(c.isalpha() for c in token) and  # Current token is a word
+                tokens[i + 1] == '-' and                               # Next token is hyphen
+                tokens[i + 2].strip() and any(c.isalpha() for c in tokens[i + 2])):  # Token after hyphen is word
+                
+                # Reconstruct the hyphenated term to check if it's canonical
+                hyphenated_term = token + '-' + tokens[i + 2]
+                
+                if hyphenated_term.lower() in canonical_hyphenated:
+                    # Keep canonical hyphenated terms unchanged
+                    result_tokens.extend([token, tokens[i + 1], tokens[i + 2]])
+                else:
+                    # Split non-canonical hyphens: replace hyphen with space
+                    result_tokens.extend([token, ' ', tokens[i + 2]])
+                
+                i += 3  # Skip the word-hyphen-word group we just processed
+            else:
+                # Regular token, add as-is
+                result_tokens.append(token)
+                i += 1
+        
+        return self.tokenizer.detokenize(result_tokens)
+
     def normalize(self, text: str, language: str = "nl") -> NormalizationResult:
         dbg: Dict[str, Any] = {"language": language, "input": text}
         current = self.guard.wrap(text)
@@ -523,6 +578,11 @@ class NormalizationPipeline:
         if self.flags.get("enable_variant_generation", True):
             current = self._apply_on_unprotected(current, self.variant_generator.generate)
             dbg["variants"] = current
+        
+        # Add hyphen splitting BEFORE phonetic matching to enable veto thresholds
+        current = self._apply_on_unprotected(current, self._split_noncanonical_hyphens)
+        dbg["hyphen_split"] = current
+        
         if self.flags.get("enable_phonetic_matching", True):
             # Unicode naar NFC voor stabiele diacritics (kárius vs cari\u0308s)
             def _phon(seg: str) -> str:
