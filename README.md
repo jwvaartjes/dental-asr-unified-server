@@ -236,10 +236,17 @@ De pipeline volgt deze stappen:
    - Bereidt tekst voor op element parsing.  
    - Nog geen inhoudelijke wijzigingen.
 
-2. **Element parsing (incl. multi-woord)**  
-   - Herkent tandnummers (1–48).  
-   - Zet patronen als `14;15;16` om naar `element 14; element 15; element 16`.  
-   - Speciale regels voor combinaties zoals `element 1, 2` → `element 12`.
+2. Element parsing (incl. context & multi-woord)
+
+Herkent tandnummers (1–48) in algemene tekst en in dental context:
+element | tand | kies | molaar | premolaar
+
+Combineert notaties: 1-4, 1,4, 14, en telwoorden in context:
+element een vier → element 14, tand twee drie → tand 23.
+
+Speciale cleanup: de 11 / de element 1-4 → element 11 / element 14.
+
+Guard tegen dubbel prefix: bestaande element 14 blijft element 14 (geen “element element 14”).
 
 3. **Learnable normalization**  
    - Past door gebruikers/praktijken gedefinieerde regels toe (uit Supabase).  
