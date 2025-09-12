@@ -14,6 +14,7 @@ from app.pairing import router, websocket_endpoint
 from app.pairing.security import SecurityMiddleware
 from app.lexicon import router as lexicon_router
 from app.ai import ai_router
+from app.test_router import router as test_router
 from app.ai.normalization import NormalizationFactory
 from app.data.registry import DataRegistry
 from app.data.loaders.loader_supabase import SupabaseLoader
@@ -116,6 +117,7 @@ def create_app(settings=None) -> FastAPI:
     app.include_router(router)
     app.include_router(lexicon_router)
     app.include_router(ai_router)
+    app.include_router(test_router)
     
     # WebSocket endpoint
     @app.websocket("/ws")
@@ -166,6 +168,7 @@ def create_app(settings=None) -> FastAPI:
             <h3>Test Pages:</h3>
             <a href="/api-test">🔬 Complete API Test Suite</a>
             <a href="/test-rate-limiter">🚦 Rate Limiter Test Suite</a>
+            <a href="/test-normalization">🧪 Normalization Test Runner</a>
             <a href="/test-desktop.html">Desktop Test Page</a>
             <a href="/test-mobile.html">Mobile Test Page</a>
             <a href="/test-mobile-local.html">Mobile Local Test Page</a>

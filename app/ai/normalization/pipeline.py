@@ -28,7 +28,7 @@ class NormalizationResult:
 _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?%?$")
 # 1) Algemeen paar 1..4 + 1..8, maar niet als er al 'element ' vóór staat
 _ELEMENT_SIMPLE_RE = re.compile(
-    r"(?<!\belement\s)\b([1-4])\s*[\- ,]?\s*([1-8])\b",
+    r"(?<!\belement\s)(?<![1-8] , )(?<![1-8], )(?<![1-8] ,)(?<![1-8],)\b([1-4])\s*[\- ,]?\s*([1-8])\b(?!\s*,\s*[1-8]\b)",
     re.IGNORECASE
 )
 _ELEMENT_LIST_FIX_RE = re.compile(r"\belement\s+([1-4])\s*[, ]\s*([1-8])\b", re.IGNORECASE)
