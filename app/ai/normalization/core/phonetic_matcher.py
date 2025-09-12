@@ -44,6 +44,7 @@ class DutchPhoneticMatcher:
         self.fuzzy_threshold = matching_config.get('fuzzy_threshold', 0.8)
         self.phonetic_enabled = matching_config.get('phonetic_enabled', True)
         self.max_edit_distance = matching_config.get('max_edit_distance', 2)
+        self.boost_top_epsilon = matching_config.get('boost_top_epsilon', 0.0)
         
         # Use provided cache or create new
         self._phonetic_cache = phonetic_cache or {}
@@ -243,7 +244,7 @@ class DutchPhoneticMatcher:
         return min(self._fuzzy_match_raw(word1, word2), 1.0)
     
     def match(self, input_text: str, candidates: List[str]) -> Optional[Tuple[str, float]]:
-        """Find best match from candidates using phonetic and fuzzy matching"""
+        """Find best match from candidates using phonetic and fuzzy matching with top-1-only boost"""
         input_norm = self.normalize_text(input_text)
         
         # Skip phonetic matching for numbers and percentages
@@ -261,10 +262,8 @@ class DutchPhoneticMatcher:
         # Generate phonetic representations
         input_phonetics = self.to_phonetic(input_text)
         
-        best_match = None
-        best_score = 0.0
-        best_raw_score = 0.0  # Track uncapped score for better selection
-        
+        # PASS 1: Calculate base scores and gather candidate data
+        cand_rows = []
         for candidate in candidates:
             candidate_norm = self.normalize_text(candidate)
             
@@ -272,51 +271,72 @@ class DutchPhoneticMatcher:
             if input_norm == candidate_norm:
                 return candidate, 1.0
             
-            # Calculate match score (may exceed 1.0 due to bonuses)
-            raw_score = self._fuzzy_match_raw(input_text, candidate)
-            score = min(raw_score, 1.0)  # Capped version for threshold checking
+            # Calculate base fuzzy score (without any phonetic boost)
+            base_score = self._fuzzy_match_raw(input_text, candidate)
             
-            # Phonetic matching bonus
+            # Check if phonetically equal
+            candidate_phonetics = self.to_phonetic(candidate)
+            phonetic_match = False
             if self.phonetic_enabled:
-                candidate_phonetics = self.to_phonetic(candidate)
-                
-                # Check if any phonetic representations match exactly
-                phonetic_exact_match = False
                 for inp_phon in input_phonetics:
                     for cand_phon in candidate_phonetics:
                         if inp_phon == cand_phon:
-                            phonetic_exact_match = True
+                            phonetic_match = True
                             break
-                    if phonetic_exact_match:
+                    if phonetic_match:
                         break
-                
-                # If phonetic exact match, apply gated boost
-                if phonetic_exact_match:
-                    phonetic_boost_floor = 0.60
-                    min_len_for_boost = 5
-                    
-                    # Only boost if base score is already decent and tokens are long enough
-                    if score >= phonetic_boost_floor and len(input_text) >= min_len_for_boost and len(candidate) >= min_len_for_boost:
-                        # Gentle boost as tie-breaker, not catapult
-                        score = max(score, 0.95)
-                        raw_score = max(raw_score, 0.95)
-                
-                # Additional phonetic similarity bonus
+            
+            # Calculate Soundex score for blending
+            soundex_score = 0.0
+            if self.phonetic_enabled and phonetic_match:
                 soundex_score = self.fuzzy_match(
                     self._dutch_soundex(input_text),
                     self._dutch_soundex(candidate)
                 )
-                score = (score + soundex_score * 0.3) / 1.3
-                raw_score = (raw_score + soundex_score * 0.3) / 1.3
             
-            # Use raw_score for comparison to distinguish between capped scores
-            if raw_score > best_raw_score:
-                best_raw_score = raw_score
-                best_score = score
-                best_match = candidate
+            cand_rows.append({
+                "candidate": candidate,
+                "base": base_score,
+                "phonetic_match": phonetic_match,
+                "soundex": soundex_score
+            })
         
-        if best_score >= self.fuzzy_threshold:
-            return best_match, best_score
+        if not cand_rows:
+            return None
+        
+        # Find best base score
+        best_base = max(r["base"] for r in cand_rows)
+        
+        # PASS 2: Apply phonetic boost only to top candidates
+        for r in cand_rows:
+            # Start with capped base score
+            r["final"] = min(r["base"], 1.0)
+            
+            # Check if this candidate is within epsilon of the best base score
+            is_top = (best_base - r["base"]) <= self.boost_top_epsilon
+            
+            # Only apply phonetic boost to top candidates
+            if is_top and r["phonetic_match"] and self.phonetic_enabled:
+                phonetic_boost_floor = 0.60
+                min_len_for_boost = 5
+                
+                # Only boost if base score is already decent and tokens are long enough
+                if r["final"] >= phonetic_boost_floor and len(input_text) >= min_len_for_boost and len(r["candidate"]) >= min_len_for_boost:
+                    # Gentle boost as tie-breaker, not catapult
+                    r["final"] = max(r["final"], 0.95)
+                    
+                    # Blend with Soundex score
+                    r["final"] = (r["final"] + r["soundex"] * 0.3) / 1.3
+            elif self.phonetic_enabled:
+                # Non-boosted candidates still get Soundex blend if phonetic match
+                if r["phonetic_match"]:
+                    r["final"] = (r["final"] + r["soundex"] * 0.3) / 1.3
+        
+        # Find best final score
+        best_row = max(cand_rows, key=lambda x: x["final"])
+        
+        if best_row["final"] >= self.fuzzy_threshold:
+            return best_row["candidate"], best_row["final"]
         
         return None
     
