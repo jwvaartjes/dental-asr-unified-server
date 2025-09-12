@@ -33,6 +33,50 @@ class _SimpleTokenizer:
 class DutchPhoneticMatcher:
     """Phonetic matching for Dutch language with dental context"""
     
+    # Generic dental prefixes that should not dominate similarity scoring
+    GENERIC_PREFIXES = (
+        "inter", "intra", "infra", "supra", "sub", "peri", "para",
+        "hyper", "hypo", "endo", "ecto", "meso", "meta", "ortho",
+        "mesio", "disto", "bucco", "linguo", "palato", "labio"
+    )
+    
+    def _detect_generic_prefix(self, word: str) -> tuple[str, str]:
+        """
+        Detect if word starts with a generic dental prefix.
+        Returns (prefix, core_word) or ('', word) if no prefix found.
+        """
+        word_lower = word.lower()
+        for prefix in self.GENERIC_PREFIXES:
+            if word_lower.startswith(prefix) and len(word) > len(prefix):
+                # Ensure there's a meaningful core word (at least 3 chars)
+                core_word = word[len(prefix):]
+                if len(core_word) >= 3:
+                    return prefix, core_word
+        return '', word
+    
+    def _prefix_aware_similarity(self, word1: str, word2: str) -> float:
+        """
+        Calculate similarity with prefix awareness.
+        If both words share the same generic prefix, focus scoring on core words.
+        """
+        prefix1, core1 = self._detect_generic_prefix(word1)
+        prefix2, core2 = self._detect_generic_prefix(word2)
+        
+        # If both have the same generic prefix, calculate similarity primarily on core words
+        if prefix1 and prefix1 == prefix2:
+            # Calculate core similarity
+            core_sim = SequenceMatcher(None, core1.lower(), core2.lower()).ratio()
+            
+            # Give small bonus for shared prefix but don't let it dominate
+            prefix_bonus = 0.1
+            
+            # Weight: 80% core similarity + 10% prefix bonus + 10% full word fallback
+            full_sim = SequenceMatcher(None, word1.lower(), word2.lower()).ratio()
+            return (core_sim * 0.8) + (prefix_bonus * 0.1) + (full_sim * 0.1)
+        
+        # No shared generic prefix - use normal similarity
+        return SequenceMatcher(None, word1.lower(), word2.lower()).ratio()
+    
     def __init__(self, config_data: Dict[str, Any] = None, 
                  phonetic_cache: Dict[str, List[str]] = None,
                  soundex_cache: Dict[str, str] = None,
@@ -203,10 +247,11 @@ class DutchPhoneticMatcher:
         if len_diff > self.max_edit_distance:
             return 0.0
         
-        # Calculate similarity - use dehyphenated versions for better matching
+        # Calculate similarity - use prefix-aware scoring and dehyphenated versions
         # This ensures "peri-apicaal" and "periapicaal" are considered very similar
-        similarity_with_hyphen = SequenceMatcher(None, word1, word2).ratio()
-        similarity_without_hyphen = SequenceMatcher(None, word1_no_hyphen, word2_no_hyphen).ratio()
+        # and that generic prefixes don't dominate similarity scoring
+        similarity_with_hyphen = self._prefix_aware_similarity(word1, word2)
+        similarity_without_hyphen = self._prefix_aware_similarity(word1_no_hyphen, word2_no_hyphen)
         
         # Use the better score - this handles both hyphenated and non-hyphenated comparisons
         similarity = max(similarity_with_hyphen, similarity_without_hyphen)
