@@ -51,8 +51,18 @@ class NormalizationFactory:
             if extra_config:
                 config.update(extra_config)
             
+            # Load custom patterns from Supabase
             logger.debug("Loading custom patterns...")
-            custom_patterns = await data_registry.get_custom_patterns(user_id)
+            try:
+                custom_patterns = await data_registry.get_custom_patterns(user_id)
+                if custom_patterns:
+                    lexicon_data["custom_patterns"] = custom_patterns
+                    logger.info(f"✅ Loaded custom patterns for user {user_id}")
+                else:
+                    logger.info(f"No custom patterns found for user {user_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load custom patterns: {e}")
+                # Continue without custom patterns
             
             logger.debug("Loading protected words...")
             protected_words = await data_registry.get_protected_words(user_id)
@@ -60,7 +70,6 @@ class NormalizationFactory:
             # Merge all data into a single lexicon structure
             combined_lexicon = {
                 **lexicon_data,
-                'custom_patterns': custom_patterns.get('patterns', {}),
                 'protect_words': protected_words.get('words', [])
             }
             

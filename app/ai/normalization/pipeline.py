@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import re
+import unicodedata
 
 # ==========================
 # Datatypes & Result object
@@ -165,6 +166,63 @@ class DefaultLearnableNormalizer:
             out = rx.sub(rep, out)
         return out
 
+class DefaultCustomPatternNormalizer:
+    def __init__(self, patterns=None):
+        self.patterns = []
+        if patterns:
+            if isinstance(patterns, dict):
+                # Handle Supabase format: {"direct_mappings": {...}, "multi_word_mappings": {...}}
+                if 'direct_mappings' in patterns or 'multi_word_mappings' in patterns:
+                    # Process direct_mappings
+                    direct_mappings = patterns.get('direct_mappings', {})
+                    if isinstance(direct_mappings, dict):
+                        for k, v in direct_mappings.items():
+                            if isinstance(v, str):
+                                self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
+                    
+                    # Process multi_word_mappings  
+                    multi_word_mappings = patterns.get('multi_word_mappings', {})
+                    if isinstance(multi_word_mappings, dict):
+                        for k, v in multi_word_mappings.items():
+                            if isinstance(v, str):
+                                self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
+                else:
+                    # Handle simple dict format: {"pattern": "replacement"}
+                    for k, v in patterns.items():
+                        if isinstance(v, str):
+                            self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
+            elif isinstance(patterns, list):
+                # Handle list format: [{"pattern": "...", "replacement": "...", "type": "..."}]
+                self.patterns = patterns
+    
+    def _nfc(self, text: str) -> str:
+        return unicodedata.normalize("NFC", text)
+    
+    def apply(self, text: str) -> str:
+        out = text
+        for pattern_data in self.patterns:
+            # Handle both dict and string replacements safely
+            pattern = pattern_data.get("pattern", "")
+            replacement = pattern_data.get("replacement", "")
+            pattern_type = pattern_data.get("type", "exact")
+            
+            # Skip invalid entries
+            if not pattern or not isinstance(replacement, str):
+                continue
+                
+            if pattern_type == "exact":
+                # Match the pattern with optional trailing punctuation and replace the whole token
+                pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
+                out = pattern_re.sub(replacement, out)
+            elif pattern_type == "regex":
+                try:
+                    pattern_re = re.compile(pattern, re.IGNORECASE)
+                    out = pattern_re.sub(replacement, out)
+                except re.error:
+                    continue
+        
+        return self._nfc(out)
+
 class DefaultVariantGenerator:
     def __init__(self, config: Dict[str, Any] | None, lexicon_data: Dict[str, Any] | None):
         cfg = config or {}
@@ -275,6 +333,7 @@ class NormalizationPipeline:
         self.tokenizer = tokenizer or DefaultTokenizer()
         self.element_parser = DefaultElementParser()
         self.learnable = DefaultLearnableNormalizer(self.lexicon.get("learnable_rules") or self.config.get("learnable_rules"))
+        self.custom_patterns = DefaultCustomPatternNormalizer(self.lexicon.get("custom_patterns"))
         self.variant_generator = DefaultVariantGenerator(self.config.get("variant_generation"), self.lexicon)
         phon_cfg = self.config.get("phonetic", {})
         self.phonetic_matcher = DefaultPhoneticMatcher(self.lexicon, self.tokenizer, float(phon_cfg.get("threshold", 0.84)))
@@ -284,6 +343,7 @@ class NormalizationPipeline:
         self.flags = {
             "enable_element_parsing": True,
             "enable_learnable": True,
+            "enable_custom_patterns": True,
             "enable_variant_generation": True,
             "enable_phonetic_matching": True,
             "enable_post_processing": True,
@@ -308,6 +368,9 @@ class NormalizationPipeline:
         if self.flags.get("enable_learnable", True):
             current = self._apply_on_unprotected(current, self.learnable.apply)
             dbg["learnable"] = current
+        if self.flags.get("enable_custom_patterns", True):
+            current = self._apply_on_unprotected(current, self.custom_patterns.apply)
+            dbg["custom_patterns"] = current
         if self.flags.get("enable_variant_generation", True):
             current = self._apply_on_unprotected(current, self.variant_generator.generate)
             dbg["variants"] = current
