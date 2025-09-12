@@ -54,8 +54,8 @@ async def run_normalization_test(request: TestRequest):
         # Get the pairing_server directory (where debug_simple.py is located)
         base_dir = Path(__file__).parent.parent
         
-        # Path to the debug script
-        script_path = base_dir / "debug_simple.py"
+        # Path to the comprehensive test script (runs ALL tests from test_normalization.py)
+        script_path = base_dir / "run_all_normalization_tests.py"
         
         if not script_path.exists():
             return PlainTextResponse(
@@ -93,9 +93,9 @@ async def run_normalization_test(request: TestRequest):
 async def run_test_direct():
     """Direct test execution endpoint."""
     try:
-        # Get the pairing_server directory (where debug_simple.py is located)
+        # Get the pairing_server directory (where comprehensive test script is located)
         base_dir = Path(__file__).parent.parent
-        script_path = base_dir / "debug_simple.py"
+        script_path = base_dir / "run_all_normalization_tests.py"
         
         if not script_path.exists():
             available_scripts = [f.name for f in base_dir.iterdir() if f.is_file() and f.suffix == '.py']

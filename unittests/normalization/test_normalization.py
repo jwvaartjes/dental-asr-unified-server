@@ -172,6 +172,161 @@ class TestDentalNormalization:
             assert result.lower() == expected.lower(), f"Failed: {input_text} -> {result} (expected {expected})"
     
     @pytest.mark.asyncio
+    async def test_hyphen_normalization_from_stable(self, normalization_pipeline):
+        """Test hyphen normalization from stable baseline (CRITICAL TESTS)"""
+        test_cases = [
+            # Key hyphen removal tests from stable normalization
+            ('licht-mucosale', 'licht mucosale'),        # Remove hyphen  
+            ('licht-mucosaal', 'licht mucosaal'),        # Remove hyphen
+            ('mesio-occlusaal', 'mesio occlusaal'),      # Remove hyphen
+            ('mesio-buccaal', 'mesio buccaal'),          # Remove hyphen
+            ('disto-occlusaal', 'disto occlusaal'),      # Remove hyphen
+            ('disto-buccaal', 'disto buccaal'),          # Remove hyphen
+            
+            # Hyphenated terms that should get hyphens
+            ('veriapicaal', 'peri-apicaal'),             # Add hyphen
+            ('periapicaal', 'peri-apicaal'),             # Add hyphen
+            ('peri-apicaal', 'peri-apicaal'),            # Keep hyphen
+            
+            # Should stay as is
+            ('verticaal', 'verticaal'),
+            ('apicaal', 'apicaal'),
+            ('radiaal', 'radiaal'),
+            ('occlusaal', 'occlusaal'),
+        ]
+        
+        for input_text, expected in test_cases:
+            result = self.normalize_text(input_text, normalization_pipeline)
+            assert result.lower() == expected.lower(), f"CRITICAL: {input_text} -> {result} (expected {expected})"
+    
+    @pytest.mark.asyncio
+    async def test_phonetic_false_positives_from_stable(self, normalization_pipeline):
+        """Test that phonetic matching doesn't create false positives (CRITICAL)"""
+        test_cases = [
+            # Important phonetic fixes - should NOT create false matches
+            ('interproximaal', 'interproximaal'),        # NOT intermaxillair
+            ('lich', 'lich'),                           # NOT laesie
+            ('lich mucosaal', 'lich mucosaal'),         # Keep as-is
+        ]
+        
+        for input_text, expected in test_cases:
+            result = self.normalize_text(input_text, normalization_pipeline)
+            assert result.lower() == expected.lower(), f"PHONETIC CRITICAL: {input_text} -> {result} (expected {expected})"
+    
+    @pytest.mark.asyncio
+    async def test_comma_separated_elements_from_stable(self, normalization_pipeline):
+        """Test comma-separated element parsing (CRITICAL REGEX FIX)"""
+        test_cases = [
+            ('1, 2, 3', '1, 2, 3'),                     # Should NOT become "element 12, 3"
+            ('14;15;16', 'element 14; element 15; element 16'),
+            ('element 1, 2', 'element 12'),             
+            ('1-4 en 2-3', 'element 14 en element 23'),
+        ]
+        
+        for input_text, expected in test_cases:
+            result = self.normalize_text(input_text, normalization_pipeline)
+            assert result.lower() == expected.lower(), f"COMMA CRITICAL: {input_text} -> {result} (expected {expected})"
+    
+    @pytest.mark.asyncio
+    async def test_comprehensive_stable_baseline_cases(self, normalization_pipeline):
+        """ALL TEST CASES from stable_baseline_workspace"""
+
+        test_cases = [
+            # Basic element parsing tests - from test_baseline.py
+            ('element een vier', 'element 14'),
+            ('karius', 'cariës'),
+            ('1-4', 'element 14'),
+            ('messial', 'mesiaal'),
+            ('30 procent', '30%'),
+
+            ("Element 26:", "element 26:"),  # Should preserve colon
+            ("Element 26", "element 26"),    # No colon to preserve
+            ("26:", "element 26:"),          # Direct number with colon
+            ("26", "element 26"),            # Direct number without colon
+            ("element 26:", "element 26:"),  # Lowercase with colon
+            ("element 26", "element 26"),    # Lowercase without colon
+            ("Element 26: Daar gaan we dan", "element 26: daar gaan wij dan"),
+            
+            # Element parsing from stable tests
+            ('14', 'element 14'),
+            ('de 11', 'element 11'),                    
+            ('tand een vier', 'tand 14'),               
+            ('kies twee drie', 'kies 23'),              
+            ('element 14 element 14', 'element 14'),     # Deduplication
+            
+            # Number words and context
+            ('element een vier', 'element 14'),         # NOT "element element 14"
+            ('de element 11', 'element 11'),            # Lidwoord cleanup
+            ('molaar 6 7', 'molaar 67'),                # Context combination
+            ('premolaar 4 5', 'premolaar 45'),          # Context combination
+            
+            # Abbreviations and variants
+            ('circa', 'ca.'),
+            ('ongeveer', 'ca.'),
+            ('parod', 'parodontitis'),
+            ('botverlies', 'botverlies'),
+            ('bot verlies', 'botverlies'),               # Compound
+            
+            # Protected words should remain unchanged
+            ('Paro', 'Paro'),
+            ('30% botverlies', '30% botverlies'),        # No fuzzy on percentages
+            
+            # Additional stable baseline tests
+            ('linguaal', 'linguaal'),
+            ('palatinaal', 'palatinaal'),
+            ('bucaal', 'buccaal'),                      # Variant correction
+            ('vestibuleer', 'vestibulair'),             # Variant correction
+            ('gingivale', 'gingivale'),
+            ('subgingivaal', 'subgingivaal'),
+            ('supragingival', 'supragingivaal'),         # Variant correction
+            
+            # Composite and restoration terms
+            ('composiet', 'composiet'),
+            ('amalgaam', 'amalgaam'),
+            ('kroon', 'kroon'),          
+            ('endo', 'endodontische behandeling'), # Expansion
+            
+            # Periodontal terms
+            ('parodontitis', 'parodontitis'),
+            ('gingivitis', 'gingivitis'),
+            ('tandvlees', 'tandvlees'),
+            ('pockets', 'parodontale pockets'),          # Expansion
+            
+            # Anatomical terms
+            ('maxilla', 'maxilla'),
+            ('mandibula', 'mandibula'),
+            ('processus', 'processus'),
+            ('alveolaire', 'alveolaire'),
+            ('bovenkaak', 'bovenkaak'),
+
+            
+              
+            # Custom patterns
+            ("karius", "cariës"),
+            ("bukkaal", "buccaal"),
+            ("festubilair", "vestibulair"),
+
+            
+            # Complex combinations
+            ("cariës distaal van de 1-4", "cariës distaal van element 14"),
+            ("element een vier distaal", "element 14 distaal"),
+            ("karius op kies twee zes", "cariës op kies 26"),
+
+            ("element 41: cariës distaal", "Should preserve colon after element number"),
+            ("element 24: moa", "Should preserve colon in element notation"),
+            ("41: cariës", "Should preserve colon after tooth number"),
+            ("element vijfenveertig: occlusaal", "Should preserve colon after spelled number"),
+
+            ("element 41: cariës distaal", "Should preserve colon after element number"),
+            ("element 24: moa", "Should preserve colon in element notation"),
+            ("41: cariës", "Should preserve colon after tooth number"),
+            ("element vijfenveertig: occlusaal", "Should preserve colon after spelled number"),
+            
+        ]
+        
+        assert self.run_test_cases_with_timing("Comprehensive Stable Baseline Test", test_cases, normalization_pipeline)
+    
+    @pytest.mark.asyncio
     async def test_comprehensive_performance(self, normalization_pipeline):
         """Test comprehensive set of cases with performance measurement"""
         test_cases = [
@@ -199,4 +354,4 @@ class TestDentalNormalization:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    pytest.main([__file__, "-v", "-x"])  # Stop on first failure for debugging
