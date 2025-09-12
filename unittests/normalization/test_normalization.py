@@ -245,7 +245,7 @@ class TestDentalNormalization:
             ("26", "element 26"),            # Direct number without colon
             ("element 26:", "element 26:"),  # Lowercase with colon
             ("element 26", "element 26"),    # Lowercase without colon
-            ("Element 26: Daar gaan we dan", "element 26: daar gaan wij dan"),
+          
             
             # Element parsing from stable tests
             ('14', 'element 14'),
@@ -290,7 +290,8 @@ class TestDentalNormalization:
             ('parodontitis', 'parodontitis'),
             ('gingivitis', 'gingivitis'),
             ('tandvlees', 'tandvlees'),
-            ('pockets', 'parodontale pockets'),          # Expansion
+            ('pocket', 'pocket'),
+            
             
             # Anatomical terms
             ('maxilla', 'maxilla'),
@@ -299,7 +300,11 @@ class TestDentalNormalization:
             ('alveolaire', 'alveolaire'),
             ('bovenkaak', 'bovenkaak'),
 
-            
+             # measerements
+            ("15 mm", "15mm"),
+            ("1,5 jaar", "1,5 jaar"),
+            ("12 weken", "12 weken"),
+            ("1-4 mm", "1-4mm"),
               
             # Custom patterns
             ("karius", "cariës"),
@@ -312,15 +317,52 @@ class TestDentalNormalization:
             ("element een vier distaal", "element 14 distaal"),
             ("karius op kies twee zes", "cariës op kies 26"),
 
-            ("element 41: cariës distaal", "Should preserve colon after element number"),
-            ("element 24: moa", "Should preserve colon in element notation"),
-            ("41: cariës", "Should preserve colon after tooth number"),
-            ("element vijfenveertig: occlusaal", "Should preserve colon after spelled number"),
+            ("element 41: cariës distaal", "element 41: cariës distaal"),
+            ("41: cariës", "element 41: cariës distaal"),
+            ("element vijfenveertig: occlusaal", "element 45: cariës distaal"),
 
-            ("element 41: cariës distaal", "Should preserve colon after element number"),
-            ("element 24: moa", "Should preserve colon in element notation"),
-            ("41: cariës", "Should preserve colon after tooth number"),
-            ("element vijfenveertig: occlusaal", "Should preserve colon after spelled number"),
+
+    ("cariës distaal van 1-4",                  "cariës distaal van element 14"),
+    ("cariës op 1 2",                           "cariës op element 12"),
+    ("cariës op een vier",                      "cariës op element 14"),
+    ("de 11 is gevoelig",                       "element 11 is gevoelig"),
+    ("element 1, 2 vertoont contact",           "element 12 vertoont contact"),
+    ("de 1 2 interfereert",                     "element 12 interereert"),  # lijst van 3 NIET samenvoegen
+
+    # --- Fuzzy met diacritics & punct ---
+    ("karius!",                                 "cariës!"),
+    ("karius-achtige laesie",                   "cariës-achtige laesie"),
+    ("cariüs distaal",                          "cariës distaal"),
+
+    # --- Hyphens: canoniek behouden, niet-canoniek splitsen ---
+    ("mesio-occlusaal contact",                 "mesio-occlusaal contact"),  # canoniek hyphen
+    ("licht-mucosale zwelling",                 "lich mucosaal gebied"),     # niet-canoniek → split vóór fuzzy
+    ("distobuccaal is oké",                     "distobuccaal is oké"),      # canoniek 1-woord (geen split)
+    ("1-4 is zichtbaar",                        "element 14 is zichtbaar"),  # cijferpaar blijft element
+
+    # --- Units & spacing ---
+    ("30 procent botverlies",                   "30% botverlies"),
+    ("15 mm pocket",                            "15mm pocket"),
+    ("1-4 mm overlap",                          "1-4mm overlap"),            # unit-guard voorkomt element-conversie
+    ("0.5 mm incisale slijt",                   "0.5mm incisale slijt"),     # decimaal blijft, unit compact
+
+    # --- Röntgen: begrippen & combinaties ---
+    ("bitewing rechts: cariës distaal 1-4",     "bitewing rechts: cariës distaal element 14"),
+    ("periapicaal apicaal beeld element 12",    "periapicaal apicaal beeld element 12"),
+    ("PA regio 13 toont overlap",               "PA regio 13 toont overlap"),
+    ("overlap bij 1, 2 (contactpunten)",        "overlap bij 1, 2 (contactpunten)"),
+
+    # --- Multi-woord fuzzy met veto/minima ---
+    ("paro pocket bij 2 4",                     "paro pocket bij element 24"),   # let op: 'Paro' is protected → alleen 'pocket' blijft
+    ("bot verlies element 35",                  "botverlies element 35"),        # samenvoeging tot canoniek 1-woord
+    ("interproximaal is schoon",                "interproximaal is schoon"),     # mag NIET naar intermaxillair
+    ("vestibuleer oppervlakkig",                "vestibulair oppervlakkig"),     # wél naar adj., niet naar 'vestibulum'
+
+    # --- Edge-cases die vroeger misgingen ---
+    ("een vierkant bestaat",                    "een vierkant bestaat"),         # 'een vier' binnen 'vierkant' mag NIET
+    ("de element 14 is gevuld",                 "element 14 is gevuld"),         # cleanup 'de element '
+    ("elemet occlusaal",                        "element occlusaal"),    
+        
             
         ]
         

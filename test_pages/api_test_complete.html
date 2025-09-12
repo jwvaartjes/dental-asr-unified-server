@@ -1098,8 +1098,7 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
         async function addProtectedWord() {
             const word = document.getElementById('protectedWord').value || 'element';
             await makeRequest('/api/protect_words', 'POST', 'Add Protected Word', {
-                words: [word],
-                reason: 'Added via API test page'
+                protected_words: [word]
             });
         }
 
@@ -1118,8 +1117,7 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
             }
             
             await makeRequest('/api/protect_words', 'POST', 'Bulk Add Protected Words', {
-                words: wordsArray,
-                reason: 'Bulk added via API test page'
+                protected_words: wordsArray
             });
         }
 
