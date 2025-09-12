@@ -26,6 +26,8 @@ class NormalizationResult:
 # ==========================
 
 _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?%?$")
+# Unit guard: detect units that follow numbers (prevent element conversion for measurements)
+_UNIT_AFTER_RE = re.compile(r'^\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f)\b', re.IGNORECASE)
 # 1) Algemeen paar 1..4 + 1..8, maar niet als er al 'element ' vóór staat
 _ELEMENT_SIMPLE_RE = re.compile(
     r"(?<!\belement\s)(?<![1-8] , )(?<![1-8], )(?<![1-8] ,)(?<![1-8],)\b([1-4])\s*[\- ,]?\s*([1-8])\b(?!\s*,\s*[1-8]\b)",
@@ -138,7 +140,24 @@ class DefaultElementParser:
         # 4) Binnen dental-context paren samenvoegen: 'tand 1 4' / 'kies 1-4' → 'tand 14' 
         text = _DENTAL_WITH_PREFIX_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}{m.group(3)}", text)
 
-        # 5) Algemene paren (buiten context), maar check eerst of er al dental context is
+        # 5) First protect units by temporarily replacing them
+        # This prevents patterns like "12 %" from being parsed as element patterns
+        protected_text = text
+        unit_protection_map = {}
+        unit_counter = 0
+        
+        def protect_unit(match):
+            nonlocal unit_counter
+            placeholder = f"〔UNIT{unit_counter}〕"
+            unit_protection_map[placeholder] = match.group(0)
+            unit_counter += 1
+            return placeholder
+        
+        # Protect number-unit patterns
+        protected_text = re.sub(r'(\d+)\s+(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|‰|°c|°f)(?=\s|$)', 
+                               protect_unit, protected_text, flags=re.IGNORECASE)
+        
+        # 6) Algemene paren (buiten context), maar check eerst of er al dental context is
         def _repl_simple(m: re.Match) -> str:
             # Check if this match is preceded by dental context words
             start_pos = m.start()
@@ -148,9 +167,29 @@ class DefaultElementParser:
                 if re.search(r"\b(element|tand|kies|molaar|premolaar)\s*$", preceding_text, re.IGNORECASE):
                     return m.group(0)  # Don't modify if in dental context
             
+            # Unit guard: if a unit follows the matched number, don't convert to element
+            suffix = text[m.end():]
+            if _UNIT_AFTER_RE.match(suffix):
+                return m.group(0)  # Return original text unchanged
+            
+            # Also guard multi-digit numbers like "12", "13", "34" followed by units
+            # Check if the match represents a continuous multi-digit number (no separators)
+            matched_text = m.group(0)
+            if matched_text.replace(' ', '').isdigit() and len(matched_text.replace(' ', '')) >= 2:
+                if _UNIT_AFTER_RE.match(suffix):
+                    return m.group(0)  # Return original text unchanged
+
             nn = f"{m.group(1)}{m.group(2)}"
             return f"element {nn}" if nn in self.valid else m.group(0)
-        return _ELEMENT_SIMPLE_RE.sub(_repl_simple, text)
+        
+        # Apply element parsing on protected text
+        result = _ELEMENT_SIMPLE_RE.sub(_repl_simple, protected_text)
+        
+        # Restore protected units
+        for placeholder, original in unit_protection_map.items():
+            result = result.replace(placeholder, original)
+            
+        return result
 
 class DefaultLearnableNormalizer:
     def __init__(self, rules: Optional[List[Dict[str, Any]]] = None):
@@ -362,6 +401,13 @@ class DefaultPostProcessor:
         t = re.sub(r"([(/\[])\s+", r"\1", t)
         t = re.sub(r"\s+([)\]/])", r"\1", t)  # let op: gebruik 't', niet 'text'
         t = re.sub(r"\s{2,}", " ", t)
+        
+        # Unit compaction: remove spaces between numbers and units
+        # Symbolic units (% and temperature units)
+        t = re.sub(r'(?<=\d)\s+(?=(?:%|‰|°c|°f))', '', t, flags=re.IGNORECASE)
+        # Alphabetic units (mm, cm, mg, etc.)
+        t = re.sub(r'(?i)(?<=\d)\s+(?=(?:mm|cm|m|ml|mg|g|kg|µm|μm|um)\b)', '', t)
+        
         # Dedupe oude-stijl: 'element NN element NN' → 'element NN'
         t = re.sub(r'\b(element\s+[1-4][1-8])\s+\1\b', r'\1', t, flags=re.IGNORECASE)
         # 'de element ' → 'element ' (oude flow)
