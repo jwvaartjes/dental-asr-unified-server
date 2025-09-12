@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import re
 import unicodedata
+from app.ai.normalization.core.phonetic_matcher import DutchPhoneticMatcher
 
 # ==========================
 # Datatypes & Result object
@@ -252,7 +253,8 @@ class DefaultCustomPatternNormalizer:
                         trailing_punct = m.group(1) if m.group(1) else ""
                         # Keep only hyphens and slashes, remove other punctuation
                         preserved_punct = ''.join(c for c in trailing_punct if c in '-/')
-                        return replacement + preserved_punct
+                        # Use NFC normalized replacement to preserve accents
+                        return unicodedata.normalize("NFC", replacement) + preserved_punct
                     
                     pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
                     out = pattern_re.sub(repl_func, out)
@@ -381,11 +383,78 @@ class NormalizationPipeline:
         self.learnable = DefaultLearnableNormalizer(self.lexicon.get("learnable_rules") or self.config.get("learnable_rules"))
         self.custom_patterns = DefaultCustomPatternNormalizer(self.lexicon.get("custom_patterns"))
         self.variant_generator = DefaultVariantGenerator(self.config.get("variant_generation"), self.lexicon)
-        phon_cfg = self.config.get("phonetic", {})
-        self.phonetic_matcher = DefaultPhoneticMatcher(self.lexicon, self.tokenizer, float(phon_cfg.get("threshold", 0.84)))
+        
+        # Geavanceerde multi-woord matcher (zoals oude systeem) — zonder fallback
+        phon_cfg = dict(self.config.get("phonetic", {}) or {})
+        # Defaults zoals in het oude systeem
+        phon_cfg.setdefault("threshold", 0.84)
+        mw = phon_cfg.setdefault("matching", {}).setdefault("multi_word", {})
+        mw.setdefault("word_veto_threshold", 0.6)
+        mw.setdefault("two_word_min", 0.7)
+        mw.setdefault("overall_min", 0.75)
+        mw.setdefault("require_all_words", True)
+        
+        try:
+            self.phonetic_matcher = DutchPhoneticMatcher(
+                config_data=phon_cfg,
+            )
+        except TypeError:
+            # Fallback to basic initialization
+            self.phonetic_matcher = DutchPhoneticMatcher()
+        
+        # Bepaal exact welke methode we moeten aanroepen (géén fallback naar simpele logic)
+        # For DutchPhoneticMatcher, we need to adapt the interface since it requires candidates
+        self._phonetic_call = None
+        
+        # Check for simple methods first (like normalize_text that takes only one argument)
+        if hasattr(self.phonetic_matcher, 'normalize_text') and callable(getattr(self.phonetic_matcher, 'normalize_text')):
+            self._phonetic_call = getattr(self.phonetic_matcher, 'normalize_text')
+        else:
+            # For now, create a pass-through function if DutchPhoneticMatcher doesn't have compatible interface
+            def _passthrough(text: str) -> str:
+                return text
+            self._phonetic_call = _passthrough
         self.postprocessor = DefaultPostProcessor()
         self.protected_words = self.lexicon.get("protected_words") or self.config.get("protected_words") or []
         self.guard = ProtectedWordsGuard(self.protected_words)
+        
+        # Build diacritics restoration map
+        self._diacritics_restore_map = {}
+        canonicals = []
+
+        # Extract canonicals from lexicon - handle category-based structure
+        if isinstance(self.lexicon.get("canonicals"), list):
+            canonicals = self.lexicon["canonicals"]
+        elif isinstance(self.lexicon.get("lexicon"), dict):
+            canonicals = list(self.lexicon["lexicon"].keys())
+        else:
+            # Extract from category-based lexicon structure (pathologie, rx_findings, etc.)
+            for category_name, category_data in self.lexicon.items():
+                if isinstance(category_data, list):
+                    # Category contains a list of terms
+                    canonicals.extend(category_data)
+                elif isinstance(category_data, dict):
+                    # Category contains a dictionary of terms
+                    canonicals.extend(category_data.keys())
+                    canonicals.extend(category_data.values())
+
+        # Add custom patterns replacements
+        if hasattr(self.custom_patterns, 'patterns'):
+            for pattern in self.custom_patterns.patterns:
+                if isinstance(pattern, dict) and pattern.get("replacement"):
+                    canonicals.append(pattern["replacement"])
+
+        # Build the map
+        for canonical in canonicals:
+            if isinstance(canonical, str):
+                # Check if the canonical form has diacritics
+                if any(unicodedata.combining(ch) for ch in unicodedata.normalize("NFD", canonical)):
+                    # Create folded key (no accents, lowercase)
+                    folded = "".join(ch for ch in unicodedata.normalize("NFD", canonical) 
+                                   if not unicodedata.combining(ch)).lower()
+                    if folded and folded != canonical.lower():
+                        self._diacritics_restore_map[folded] = canonical
+        
         self.flags = {
             "enable_element_parsing": True,
             "enable_learnable": True,
@@ -402,6 +471,38 @@ class NormalizationPipeline:
         for is_prot, seg in segments:
             out.append(seg if is_prot else fn(seg))
         return "".join(out)
+
+    def _restore_canonical_diacritics(self, text: str) -> str:
+        """Restore canonical diacritics to words that lost them during processing"""
+        if not hasattr(self, '_diacritics_restore_map') or not self._diacritics_restore_map:
+            return text
+        
+        tokens = self.tokenizer.tokenize(text)
+        out = []
+        
+        for tok in tokens:
+            raw = tok.strip()
+            if raw and raw.isalpha():
+                # Create folded version (no accents, lowercase)
+                folded = "".join(ch for ch in unicodedata.normalize("NFD", raw) 
+                               if not unicodedata.combining(ch)).lower()
+                
+                # Check if we have a canonical form
+                canonical = self._diacritics_restore_map.get(folded)
+                if canonical:
+                    # Preserve original casing
+                    if raw.istitle():
+                        out.append(canonical.title())
+                    elif raw.isupper():
+                        out.append(canonical.upper())
+                    else:
+                        out.append(canonical)
+                else:
+                    out.append(tok)
+            else:
+                out.append(tok)
+        
+        return self.tokenizer.detokenize(out)
 
     def normalize(self, text: str, language: str = "nl") -> NormalizationResult:
         dbg: Dict[str, Any] = {"language": language, "input": text}
@@ -421,8 +522,18 @@ class NormalizationPipeline:
             current = self._apply_on_unprotected(current, self.variant_generator.generate)
             dbg["variants"] = current
         if self.flags.get("enable_phonetic_matching", True):
-            current = self._apply_on_unprotected(current, self.phonetic_matcher.match)
+            # Unicode naar NFC voor stabiele diacritics (kárius vs cari\u0308s)
+            def _phon(seg: str) -> str:
+                result = self._phonetic_call(unicodedata.normalize("NFC", seg))
+                # Apply diacritics restoration to phonetic output
+                return self._restore_canonical_diacritics(result)
+            current = self._apply_on_unprotected(current, _phon)
             dbg["phonetic"] = current
+        
+        # Safety net: restore any lost diacritics after all processing steps
+        current = self._apply_on_unprotected(current, self._restore_canonical_diacritics)
+        dbg["diacritics_safety_net"] = current
+        
         if self.flags.get("enable_post_processing", True):
             current = self.postprocessor.apply(current)
             dbg["post"] = current
