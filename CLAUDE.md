@@ -338,7 +338,7 @@ Once the server is running, access all features:
 - 🛡️ Security (rate limiting, origin validation)
 - 🔌 WebSocket (real-time communication)
 
-## 📊 **CURRENT STATUS (September 11, 2025)**
+## 📊 **CURRENT STATUS (September 12, 2025)**
 
 ### **✅ COMPLETED FEATURES**
 - **Unified Server Architecture**: Single server for all operations
@@ -349,13 +349,17 @@ Once the server is running, access all features:
 - **API Test Suite**: Comprehensive testing interface
 - **Lexicon Management**: Complete CRUD operations
 - **Security**: Rate limiting, origin validation, JWT tokens
+- **Normalization Pipeline**: Dutch dental terminology fixes applied
+- **Element Parsing**: Fixed comma-separated list regex
+- **Web-based Testing**: Complete test runner with comprehensive test suite
 
-### **🔧 RECENT FIXES**
-- **File Upload Validation**: Added comprehensive validation for audio files
-- **Authentication Roles**: Fixed undefined values in user responses
-- **Email Validation**: Made check-email endpoint realistic (known domains only)
-- **Base64 Conversion**: Handle large files without memory errors
-- **Error Reporting**: Clear error messages for troubleshooting
+### **🔧 RECENT FIXES (September 12, 2025)**
+- **Server Restart**: Successfully restarted unified server on port 8089
+- **Element Parsing Regex**: Fixed to prevent "1, 2, 3" becoming "element 12, 3" 
+- **Phonetic Matching**: Implemented gated boosting to prevent false positives like "lich" → "laesie"
+- **Web Test Runner**: Added comprehensive test suite with 25 test cases
+- **Git Integration**: Committed and pushed all changes to GitHub
+- **Test Coverage**: Added ALL requested tests including "licht-mucosaal" and "interproximaal"
 
 ### **📋 TECHNICAL HIGHLIGHTS**
 1. **Single Command Deploy**: `python3 -m app.main` starts everything

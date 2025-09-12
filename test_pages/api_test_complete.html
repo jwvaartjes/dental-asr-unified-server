@@ -421,27 +421,51 @@
                 </div>
 
                 <div class="endpoint-group">
-                    <h4>Lexicon Modifications</h4>
+                    <h4>Manage Canonical Terms</h4>
                     <div class="input-group">
                         <label for="canonicalTerm">Canonical Term:</label>
-                        <input type="text" id="canonicalTerm" value="cariës" placeholder="New canonical term">
+                        <input type="text" id="canonicalTerm" value="cariës" placeholder="Canonical term to add/remove">
                     </div>
                     <div class="input-group">
                         <label for="termCategory">Category:</label>
-                        <input type="text" id="termCategory" value="oral_findings" placeholder="Category name">
+                        <select id="termCategorySelect" style="width: 100%; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; background: rgba(255, 255, 255, 0.05); color: #e0e0e0; font-size: 14px; margin-bottom: 5px;">
+                            <option value="">-- Select Category --</option>
+                            <option value="oral_findings">oral_findings</option>
+                            <option value="tooth_surfaces">tooth_surfaces</option>
+                            <option value="treatments">treatments</option>
+                            <option value="materials">materials</option>
+                            <option value="anatomical">anatomical</option>
+                        </select>
+                        <input type="text" id="termCategory" value="oral_findings" placeholder="Or enter custom category name">
                     </div>
-                    <button class="btn lexicon" onclick="addCanonical()">
-                        Add Canonical <span class="endpoint-badge method-post">POST</span>
-                    </button>
-                    <button class="btn lexicon" onclick="removeCanonical()">
-                        Remove Canonical <span class="endpoint-badge method-delete">DELETE</span>
-                    </button>
-                    <button class="btn lexicon" onclick="addCategory()">
-                        Add Category <span class="endpoint-badge method-post">POST</span>
-                    </button>
-                    <button class="btn lexicon" onclick="deleteCategory()">
-                        Delete Category <span class="endpoint-badge method-delete">DELETE</span>
-                    </button>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="addCanonical()">
+                            ➕ Add Canonical Term <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                        <button class="btn lexicon" onclick="removeCanonical()" style="background: linear-gradient(45deg, #dc2626, #b91c1c);">
+                            ➖ Remove Canonical Term <span class="endpoint-badge method-delete">DELETE</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>Manage Categories</h4>
+                    <div class="input-group">
+                        <label for="newCategoryName">New Category Name:</label>
+                        <input type="text" id="newCategoryName" value="test_category" placeholder="Category to add/delete">
+                    </div>
+                    <div class="input-group">
+                        <label for="categoryDescription">Category Description:</label>
+                        <input type="text" id="categoryDescription" value="Test category for API demonstration" placeholder="Brief description of category">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="addCategory()">
+                            📁 Add New Category <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                        <button class="btn lexicon" onclick="deleteCategory()" style="background: linear-gradient(45deg, #dc2626, #b91c1c);">
+                            🗑️ Delete Category <span class="endpoint-badge method-delete">DELETE</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -450,16 +474,32 @@
                 <h3>🛡️ Protected Words</h3>
                 
                 <div class="endpoint-group">
-                    <h4>Protected Word Management</h4>
+                    <h4>View Protected Words</h4>
                     <button class="btn" onclick="testEndpoint('/api/protect_words')">
-                        Get Protected Words <span class="endpoint-badge method-get">GET</span>
+                        Get All Protected Words <span class="endpoint-badge method-get">GET</span>
                     </button>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>Manage Protected Words</h4>
                     <div class="input-group">
                         <label for="protectedWord">Protected Word:</label>
-                        <input type="text" id="protectedWord" value="element" placeholder="Word to protect">
+                        <input type="text" id="protectedWord" value="Paro" placeholder="Word to protect/unprotect">
                     </div>
-                    <button class="btn" onclick="addProtectedWord()">
-                        Add Protected Word <span class="endpoint-badge method-post">POST</span>
+                    <div style="margin: 10px 0;">
+                        <button class="btn" onclick="addProtectedWord()">
+                            ➕ Add Protected Word <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                        <button class="btn" onclick="removeProtectedWord()" style="background: linear-gradient(45deg, #dc2626, #b91c1c);">
+                            ➖ Remove Protected Word <span class="endpoint-badge method-delete">DELETE</span>
+                        </button>
+                    </div>
+                    <div class="input-group">
+                        <label for="protectedWordBulk">Bulk Add (comma-separated):</label>
+                        <input type="text" id="protectedWordBulk" value="Paro, Cito, OPT" placeholder="Word1, Word2, Word3">
+                    </div>
+                    <button class="btn" onclick="bulkAddProtectedWords()">
+                        📝 Bulk Add Protected Words <span class="endpoint-badge method-post">POST</span>
                     </button>
                 </div>
             </div>
@@ -519,7 +559,46 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
             updateTokenStatus();
             checkServerStatus();
             updateAIStatus();
+            loadCategories();
+            
+            // Update category input when selection changes
+            document.getElementById('termCategorySelect').addEventListener('change', function() {
+                if (this.value) {
+                    document.getElementById('termCategory').value = this.value;
+                }
+            });
         });
+
+        // Load available categories into dropdown
+        async function loadCategories() {
+            try {
+                const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+                const response = await fetch(`${BASE_URL}/api/lexicon/categories`, { headers });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const select = document.getElementById('termCategorySelect');
+                    
+                    // Clear existing options except the first
+                    while (select.children.length > 1) {
+                        select.removeChild(select.lastChild);
+                    }
+                    
+                    // Add categories from API
+                    if (data.categories && Array.isArray(data.categories)) {
+                        data.categories.forEach(category => {
+                            const option = document.createElement('option');
+                            option.value = category;
+                            option.textContent = category;
+                            select.appendChild(option);
+                        });
+                    }
+                }
+            } catch (error) {
+                // Silently fail - dropdown will use defaults
+                console.log('Could not load categories:', error.message);
+            }
+        }
 
         // Utility Functions
         function log(message, isError = false) {
@@ -957,32 +1036,59 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
 
         async function addCanonical() {
             const term = document.getElementById('canonicalTerm').value || 'cariës';
-            const category = document.getElementById('termCategory').value || 'oral_findings';
-            await makeRequest('/api/lexicon/add-canonical', 'POST', 'Add Canonical', {
-                canonical_term: term,
-                category: category
+            const select = document.getElementById('termCategorySelect');
+            const input = document.getElementById('termCategory');
+            const category = select.value || input.value || 'oral_findings';
+            
+            if (!term.trim()) {
+                log('❌ Please enter a canonical term', true);
+                return;
+            }
+            
+            if (!category.trim()) {
+                log('❌ Please select or enter a category', true);
+                return;
+            }
+            
+            await makeRequest('/api/lexicon/add-canonical', 'POST', 'Add Canonical Term', {
+                term: term.trim(),
+                category: category.trim()
             });
         }
 
         async function removeCanonical() {
             const term = document.getElementById('canonicalTerm').value || 'cariës';
-            const category = document.getElementById('termCategory').value || 'oral_findings';
-            await makeRequest('/api/lexicon/remove-canonical', 'DELETE', 'Remove Canonical', {
-                canonical_term: term,
-                category: category
+            const select = document.getElementById('termCategorySelect');
+            const input = document.getElementById('termCategory');
+            const category = select.value || input.value || 'oral_findings';
+            
+            if (!term.trim()) {
+                log('❌ Please enter a canonical term', true);
+                return;
+            }
+            
+            if (!category.trim()) {
+                log('❌ Please select or enter a category', true);
+                return;
+            }
+            
+            await makeRequest('/api/lexicon/remove-canonical', 'DELETE', 'Remove Canonical Term', {
+                term: term.trim(),
+                category: category.trim()
             });
         }
 
         async function addCategory() {
-            const category = document.getElementById('termCategory').value || 'test_category';
+            const category = document.getElementById('newCategoryName').value || 'test_category';
+            const description = document.getElementById('categoryDescription').value || 'Test category description';
             await makeRequest('/api/lexicon/add-category', 'POST', 'Add Category', {
                 category_name: category,
-                description: 'Test category description'
+                description: description
             });
         }
 
         async function deleteCategory() {
-            const category = document.getElementById('termCategory').value || 'test_category';
+            const category = document.getElementById('newCategoryName').value || 'test_category';
             await makeRequest('/api/lexicon/delete-category', 'DELETE', 'Delete Category', {
                 category_name: category
             });
@@ -992,8 +1098,28 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
         async function addProtectedWord() {
             const word = document.getElementById('protectedWord').value || 'element';
             await makeRequest('/api/protect_words', 'POST', 'Add Protected Word', {
-                word: word,
-                reason: 'API test'
+                words: [word],
+                reason: 'Added via API test page'
+            });
+        }
+
+        async function removeProtectedWord() {
+            const word = document.getElementById('protectedWord').value || 'element';
+            await makeRequest(`/api/protect_words/${encodeURIComponent(word)}`, 'DELETE', 'Remove Protected Word');
+        }
+
+        async function bulkAddProtectedWords() {
+            const bulkWords = document.getElementById('protectedWordBulk').value || 'Paro, Cito';
+            const wordsArray = bulkWords.split(',').map(word => word.trim()).filter(word => word.length > 0);
+            
+            if (wordsArray.length === 0) {
+                log('❌ Please enter at least one word to add', true);
+                return;
+            }
+            
+            await makeRequest('/api/protect_words', 'POST', 'Bulk Add Protected Words', {
+                words: wordsArray,
+                reason: 'Bulk added via API test page'
             });
         }
 
