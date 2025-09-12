@@ -196,102 +196,160 @@ This project is part of the Dental ASR System - proprietary software for dental 
 
 # Normalization Pipeline
 
-De **Normalization Pipeline** zet ruwe transcriptietekst (spraak → tekst) om naar een **gestandaardiseerde medische/dentale representatie**.  
-Dit is nodig omdat patiënten, assistenten en tandartsen dingen op heel veel manieren kunnen zeggen of schrijven, terwijl het systeem één eenduidige vorm nodig heeft.
+Deze pipeline zet **ruwe transcriptietekst** om naar een **gestandaardiseerde dentale representatie**.  
+Ze is deterministisch, config-gedreven (Supabase) en reproduceert de “slimmigheden” van het oude systeem.
 
 ---
 
-## Waarom een pipeline?
+## TL;DR (wat doet het?)
 
-- Transcripties zijn vaak rommelig: cijfers, afkortingen, spelfouten, of woorden die meerdere betekenissen hebben.
-- De pipeline maakt hiervan een **uniforme, voorspelbare tekst** die geschikt is voor opslag, zoekopdrachten en rapportages.
-- Dit gebeurt in een **deterministische flow**: dezelfde input levert altijd dezelfde output.
-
----
-
-## Belangrijk concept: tokenization
-
-De pipeline werkt niet rechtstreeks op de tekst, maar op **tokens**:
-- **Tokenizer** splitst tekst in woorden, cijfers en interpunctie (`14;15;16` → `14`, `;`, `15`, `;`, `16`).
-- Elk blok in de pipeline werkt op tokens en kan tokens vervangen of samenvoegen.
-- Aan het eind worden de tokens weer netjes samengevoegd tot gewone tekst.
-
-Zonder tokenizer zouden veel stappen niet betrouwbaar zijn:
-- `14;15;16` zou als één woord blijven staan → geen element parsing mogelijk.
-- Fuzzy matching zou ook leestekens meenemen.
-- Multi-woord regels zouden niet kloppen.
+- Herkent en normaliseert **tandnummers (1–48)** in vrije tekst en binnen **dental context** (element/tand/kies/molaar/premolaar).
+- **Protected words** blijven onaangeroerd.
+- **Telwoorden** in context worden gecombineerd: `element een vier` → `element 14`, `tand twee drie` → `tand 23`.
+- **Lidwoord-cleanup**: `de 11` → `element 11`.
+- **Varianten** en **fuzzy** corrigeren spelfouten (geen matching op cijfers/percentages).
+- **Postprocessing** ruimt spaties op en verwijdert dubbele frasen: `element 14 element 14` → `element 14`.
 
 ---
 
-## Volgorde van de pipeline
+## Belangrijke begrippen
 
-De pipeline volgt deze stappen:
+### Tokenization (doorlopend)
+De pipeline werkt op **tokens** (woorden, cijfers, interpunctie) en voegt ze aan het einde weer netjes samen.
+- Preprocessing maakt `14;15;16` token-vriendelijk: `14 ; 15 ; 16`.
+- Fuzzy werkt **per token** (interpunctie en cijfers worden overgeslagen).
+- NBSP’s (`\u00A0`) worden eerst genormaliseerd naar gewone spaties.
 
-0. **Protected words wrappen**  
-   Woorden uit Supabase (“protected words”) worden gemarkeerd en mogen **nooit** aangepast worden.  
-   Voorbeeld: “Paro” blijft altijd “Paro”.
+### Protected Words
+Woorden uit Supabase worden gewrapt en **niet** genormaliseerd.  
+Voorbeeld: `Paro` blijft exact `Paro`.
 
-1. **Preprocessing**  
-   - Scheidt separators (`,` `;` `-` `/`) tussen cijfers.  
-   - Bereidt tekst voor op element parsing.  
-   - Nog geen inhoudelijke wijzigingen.
+### Dental Context Words
+Dezelfde set als in het oude systeem:
 
-2. Element parsing (incl. context & multi-woord)
-
-Herkent tandnummers (1–48) in algemene tekst en in dental context:
 element | tand | kies | molaar | premolaar
 
-Combineert notaties: 1-4, 1,4, 14, en telwoorden in context:
-element een vier → element 14, tand twee drie → tand 23.
-
-Speciale cleanup: de 11 / de element 1-4 → element 11 / element 14.
-
-Guard tegen dubbel prefix: bestaande element 14 blijft element 14 (geen “element element 14”).
-
-3. **Learnable normalization**  
-   - Past door gebruikers/praktijken gedefinieerde regels toe (uit Supabase).  
-   - Kan ook multi-woord regexregels bevatten.  
-   - Voorbeeld: `gingiva` → `tandvlees`.
-
-4. **Variant generation**  
-   - Vervangt afkortingen en spellingvarianten door canonieke vormen.  
-   - Voorbeeld: `parod` → `parodontitis`.  
-   - Zet cijferwoorden om: `vier` → `4`.  
-   - **Altijd vóór fuzzy matching**.
-
-5. **Phonetic/fuzzy matching**  
-   - Vergelijkt tokens met canonieke woorden uit het lexicon.  
-   - Corrigeert spelfouten of verkeerde transcripties.  
-   - Multi-woord combinaties mogelijk: `bot verlies` → `botverlies`.  
-   - Numerieke tokens worden overgeslagen.
-
-6. **Postprocessing**  
-   - Opruimen van spaties en leestekens.  
-   - Dubbele spaties weg, interpunctie strak tegen de woorden.
-
-7. **Protected unwrap**  
-   - Markers rond protected words worden verwijderd.  
-   - Die woorden staan dus exact zoals ze binnenkwamen.
+Binnen deze context worden telwoorden en getallen gecombineerd tot **elementnummers**.
 
 ---
 
-## Multi-woord parsing
+## Stap-voor-stap (pipeline)
 
-Multi-woord parsing gebeurt op twee niveaus:
+0) **Protected wrap**  
+   Markeer protected words; alle stappen werken alleen op onbeschermde segmenten.
 
-1. **Vroeg in de flow** (Element parsing)  
-   Voor getallenreeksen zoals `1-4`, `1,4`, `14`.
+1) **Preprocessing**  
+   - NBSP → spatie.  
+   - Scheid separators tussen cijfers (`, ; - /`), zodat `14;15` goed parsebaar wordt.  
+   *(Geen lowercasing of inhoudelijke wijzigingen.)*
 
-2. **Later in de flow** (Variant/fuzzy matching)  
-   Voor lexicale samenstellingen zoals `bot verlies` → `botverlies`.
+2) **Element parsing (context & multi-woord)**  
+   - Herkent **paren 1..4 + 1..8** in algemene tekst → `element NN`.  
+   - **Context-regels (oude slimmigheden):**  
+     - `element 1, 2` → `element 12`  
+     - `de 11` / `de element 1-4` → `element 11` / `element 14`  
+     - `<context> een vier` → `<context> 14` (bv. `tand een vier` → `tand 14`)  
+     - `<context> 1 4` / `<context> 1-4` → `<context> 14`  
+   - Guard tegen dubbel prefix: bestaand `element 14` blijft `element 14` (nooit `element element 14`).
+
+3) **Learnable normalization (Supabase)**  
+   Regex-regels per praktijk/gebruiker (kan multi-woord zijn).
+
+4) **Variant generation (vóór fuzzy)**  
+   - Spellingvarianten/afkortingen → canoniek.  
+   - **Cijferwoorden (contextgevoelig):**  
+     - `één` → altijd `1`  
+     - `een` → **alleen** numeriek in relevante context (bv. na contextwoord of tussen element-separators).  
+     - Aanbevolen: laat `"een": "1"` **weg** uit Supabase; `"één": "1"` wel opnemen.
+
+5) **Phonetic/fuzzy matching**  
+   - Levenshtein per woordtoken tegen canonieke termen.  
+   - **Slaat cijfers/percentages over**.  
+   - Kan multi-woord samenstellingen corrigeren (bv. `bot verlies` → `botverlies`).
+
+6) **Postprocessing**  
+   - Spaties en interpunctie opschonen.  
+   - **Dedup** oude-stijl: `element 14 element 14` → `element 14`.  
+   - **Lidwoord-cleanup**: `" de element "` → `" element "`; `"de element …"` aan zinbegin → `"element …"`.
+
+7) **Protected unwrap**  
+   Verwijder markers; protected words blijven exact zoals ingevoerd.
 
 ---
 
-## Integratie in FastAPI
+## Voorbeelden (verwachte output)
 
-- **Startup**: `NormalizationFactory` laadt lexicon + config uit Supabase en bouwt de pipeline.  
-- **Request handler**: transcriberesultaat (`raw_text`) gaat door `pipeline.normalize(...)`.  
-- **Response**: naast `raw` en `text` wordt ook `normalized` teruggegeven.
+- `14;15;16` → `element 14; element 15; element 16`  
+- `element 1, 2` → `element 12`  
+- `de 11` → `element 11`  
+- `element een vier` → `element 14`  
+- `tand een vier` → `tand 14`  
+- `kies twee drie` → `kies 23`  
+- `1-4 en 2-3` → `element 14 en element 23`  
+- `Paro met parod` → `Paro met parodontitis` (protected + variant)  
+- `30% botverlies` → `30% botverlies` (fuzzy negeert percentage)
+
+---
+
+## Config (Supabase) – minimaal vereist
+
+```json
+{
+  "variant_generation": {
+    "separators": ["-", " ", ",", ";", "/"],
+    "element_separators": ["-", " ", ",", ";", "/"],
+    "digit_words": {
+      "één": "1",
+      "twee": "2",
+      "drie": "3",
+      "vier": "4",
+      "vijf": "5",
+      "zes": "6",
+      "zeven": "7",
+      "acht": "8"
+      // Tip: laat "een" weg; context regelt dit
+    }
+  },
+  "phonetic": { "threshold": 0.84 },
+  "normalization": {
+    "enable_element_parsing": true,
+    "enable_learnable": true,
+    "enable_variant_generation": true,
+    "enable_phonetic_matching": true,
+    "enable_post_processing": true
+  },
+  "protected_words": ["Paro", "Cito"]
+}
+
+Als variant_generation.separators of element_separators ontbreken, faalt de init expliciet met een duidelijke fout—zet ze dus altijd.
+
+Integratie (FastAPI)
+
+Startup (éénmalig):
+
+# main.py
+app.state.normalization_pipeline = await NormalizationFactory.create_for_admin(data_registry)
+
+In de route:
+
+norm = request.state.normalization_pipeline.normalize(raw_text, language=result.language or "nl")
+return TranscriptionResponse(
+  text=raw_text, raw=raw_text, normalized=norm.normalized_text, language=result.language or "nl", ...
+)
+
+Debugging
+
+Elke stap logt de tussenstand in NormalizationResult.debug. Typische checks:
+
+Zit \uFFF0…\uFFF1 rond protected words in protected_wrap?
+
+Zie je de separator-spaties in preprocess?
+
+Is de 11 al element 11 in elements?
+
+Zie je varianten/fuzzy pas na variants/phonetic?
+
+
 
 ```python
 norm = pipeline.normalize(raw_text, language="nl")

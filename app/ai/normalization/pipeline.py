@@ -167,8 +167,20 @@ class DefaultLearnableNormalizer:
         return out
 
 class DefaultCustomPatternNormalizer:
-    def __init__(self, patterns=None):
+    """
+    Enhanced custom pattern normalizer with Unicode normalization and smart punctuation handling.
+    
+    Features:
+    - Handles both Supabase format and direct dict patterns
+    - Unicode NFC normalization before pattern matching
+    - Smart punctuation preservation for compound words (karius-achtige → cariës-achtige)
+    - Patterns sorted by length (longer patterns processed first)
+    """
+    
+    def __init__(self, patterns=None, preserve_punctuation=True):
         self.patterns = []
+        self.preserve_punctuation = preserve_punctuation
+        
         if patterns:
             if isinstance(patterns, dict):
                 # Handle Supabase format: {"direct_mappings": {...}, "multi_word_mappings": {...}}
@@ -194,12 +206,29 @@ class DefaultCustomPatternNormalizer:
             elif isinstance(patterns, list):
                 # Handle list format: [{"pattern": "...", "replacement": "...", "type": "..."}]
                 self.patterns = patterns
+        
+        # Sort patterns by length (longer patterns first to prevent short matches from overriding longer ones)
+        self.patterns.sort(key=lambda p: len(p.get("pattern", "")), reverse=True)
     
     def _nfc(self, text: str) -> str:
         return unicodedata.normalize("NFC", text)
     
     def apply(self, text: str) -> str:
-        out = text
+        """
+        Apply custom pattern transformations with Unicode normalization and smart punctuation handling.
+        
+        Args:
+            text: Input text to transform
+            
+        Returns:
+            Transformed text with pattern replacements applied
+        """
+        if not self.patterns:
+            return text
+        
+        # Apply Unicode NFC normalization first for consistent diacritic matching
+        out = self._nfc(text)
+        
         for pattern_data in self.patterns:
             # Handle both dict and string replacements safely
             pattern = pattern_data.get("pattern", "")
@@ -211,9 +240,26 @@ class DefaultCustomPatternNormalizer:
                 continue
                 
             if pattern_type == "exact":
-                # Match the pattern with optional trailing punctuation and replace the whole token
-                pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
-                out = pattern_re.sub(replacement, out)
+                if self.preserve_punctuation:
+                    # Smart punctuation preservation: keep hyphens and slashes for compound words
+                    # "karius-achtige" → "cariës-achtige" (hyphen preserved)
+                    # "karius/achtige" → "cariës/achtige" (slash preserved) 
+                    # "karius!" → "cariës" (punctuation removed)
+                    
+                    # One pass: match pattern and capture trailing punctuation
+                    # Keep hyphens and slashes, remove other punctuation
+                    def repl_func(m):
+                        trailing_punct = m.group(1) if m.group(1) else ""
+                        # Keep only hyphens and slashes, remove other punctuation
+                        preserved_punct = ''.join(c for c in trailing_punct if c in '-/')
+                        return replacement + preserved_punct
+                    
+                    pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
+                    out = pattern_re.sub(repl_func, out)
+                else:
+                    # Original behavior: remove all punctuation after matches
+                    pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
+                    out = pattern_re.sub(replacement, out)
             elif pattern_type == "regex":
                 try:
                     pattern_re = re.compile(pattern, re.IGNORECASE)
@@ -221,7 +267,7 @@ class DefaultCustomPatternNormalizer:
                 except re.error:
                     continue
         
-        return self._nfc(out)
+        return out
 
 class DefaultVariantGenerator:
     def __init__(self, config: Dict[str, Any] | None, lexicon_data: Dict[str, Any] | None):
