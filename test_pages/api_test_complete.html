@@ -379,16 +379,23 @@
                 </div>
 
                 <div class="endpoint-group">
-                    <h4>Transcription</h4>
+                    <h4>Speech-to-Text Transcription</h4>
                     <div class="input-group">
-                        <label for="transcribeText">Test Text:</label>
-                        <input type="text" id="transcribeText" value="element 11 cariës" placeholder="Dutch dental text">
+                        <label for="audioFileInput">Upload Audio File:</label>
+                        <input type="file" id="audioFileInput" accept="audio/*" onchange="updateTranscribeButton()">
+                        <small>Upload a WAV, MP3, or other audio file to test speech-to-text transcription</small>
                     </div>
-                    <button class="btn ai" onclick="testTranscribe()">
-                        Transcribe <span class="endpoint-badge method-post">POST</span>
+                    <button class="btn ai" id="transcribeBtn" onclick="testTranscribe()" disabled>
+                        Transcribe Audio (Base64) <span class="endpoint-badge method-post">POST</span>
+                        <span class="endpoint-url">/api/ai/transcribe</span>
                     </button>
                     <button class="btn ai" onclick="testTranscribeFile()">
-                        Transcribe File <span class="endpoint-badge method-post">POST</span>
+                        Transcribe File (Direct Upload) <span class="endpoint-badge method-post">POST</span>
+                        <span class="endpoint-url">/api/ai/transcribe-file</span>
+                    </button>
+                    <button class="btn ai" onclick="testWithSampleAudio()">
+                        Test with Sample Audio <span class="endpoint-badge method-post">POST</span>
+                        <span class="endpoint-url">/api/ai/transcribe</span>
                     </button>
                 </div>
             </div>
@@ -711,43 +718,207 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
             await makeRequest(endpoint, method, `Test ${endpoint}`, body);
         }
 
-        async function testTranscribe() {
-            const testText = document.getElementById('transcribeText').value || 'element 11 cariës';
+        function updateTranscribeButton() {
+            const fileInput = document.getElementById('audioFileInput');
+            const transcribeBtn = document.getElementById('transcribeBtn');
             
-            // Generate fake audio data (base64 encoded WAV header)
-            const fakeAudioData = 'UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQIAAAAAAA==';
-            
-            const requestBody = {
-                audio_data: fakeAudioData,
-                language: 'nl',
-                prompt: `Dutch dental terminology: ${testText}`,
-                format: 'wav'
-            };
+            // Enable button only if file is selected
+            transcribeBtn.disabled = !fileInput.files.length;
+        }
 
-            await makeRequest('/api/ai/transcribe', 'POST', 'AI Transcription', requestBody);
+        async function testTranscribe() {
+            const fileInput = document.getElementById('audioFileInput');
+            
+            if (!fileInput.files.length) {
+                log('❌ Please select an audio file first', true);
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            
+            // Validate file
+            const maxSize = 25 * 1024 * 1024; // 25MB (OpenAI limit)
+            if (file.size > maxSize) {
+                log(`❌ File too large: ${(file.size / 1024 / 1024).toFixed(1)}MB (max 25MB)`, true);
+                return;
+            }
+            
+            if (file.size === 0) {
+                log('❌ File is empty', true);
+                return;
+            }
+            
+            // Check file format
+            const extension = file.name.split('.').pop().toLowerCase();
+            const supportedFormats = ['wav', 'mp3', 'm4a', 'ogg', 'flac', 'mp4', 'webm'];
+            if (!supportedFormats.includes(extension)) {
+                log(`❌ Unsupported format: ${extension}. Supported: ${supportedFormats.join(', ')}`, true);
+                return;
+            }
+            
+            log(`🎵 Processing file: ${file.name} (${(file.size / 1024).toFixed(1)}KB, ${extension})`);
+            
+            try {
+                // Check if it's likely to be a very short audio (less than OpenAI's 0.1s minimum)
+                if (file.size < 1000) { // Very rough heuristic for tiny files
+                    log('⚠️ Warning: File seems very small, may be too short for OpenAI (min 0.1s)', false);
+                }
+                
+                // Convert file to base64 - handle large files properly
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                log(`🔄 Converting ${uint8Array.length} bytes to base64...`);
+                
+                // Convert in chunks to avoid "too many function arguments" error
+                let binary = '';
+                const chunkSize = 8192;
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                    const chunk = uint8Array.slice(i, i + chunkSize);
+                    binary += String.fromCharCode.apply(null, chunk);
+                }
+                const base64Audio = btoa(binary);
+                
+                log(`✅ Base64 conversion complete (${base64Audio.length} chars)`);
+                
+                const requestBody = {
+                    audio_data: base64Audio,
+                    language: 'nl',
+                    prompt: 'Dutch dental terminology',
+                    format: extension
+                };
+
+                await makeRequest('/api/ai/transcribe', 'POST', 'AI Transcription (Uploaded File)', requestBody);
+            } catch (error) {
+                log(`❌ File processing error: ${error.message}`, true);
+                console.error('Full error:', error);
+            }
+        }
+
+        async function testWithSampleAudio() {
+            // Use the provided test WAV file if it exists, otherwise create a minimal WAV
+            try {
+                log('🎵 Testing with sample audio data...');
+                
+                // Try to fetch the test file first
+                try {
+                    const response = await fetch(`./test_for_api.wav`);
+                    if (response.ok) {
+                        const arrayBuffer = await response.arrayBuffer();
+                        const uint8Array = new Uint8Array(arrayBuffer);
+                        
+                        // Convert in chunks to avoid "too many function arguments" error
+                        let binary = '';
+                        const chunkSize = 8192;
+                        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                            const chunk = uint8Array.slice(i, i + chunkSize);
+                            binary += String.fromCharCode.apply(null, chunk);
+                        }
+                        const base64Audio = btoa(binary);
+                        
+                        const requestBody = {
+                            audio_data: base64Audio,
+                            language: 'nl',
+                            prompt: 'Dutch dental terminology',
+                            format: 'wav'
+                        };
+
+                        await makeRequest('/api/ai/transcribe', 'POST', 'AI Transcription (Sample Audio)', requestBody);
+                        return;
+                    }
+                } catch (e) {
+                    log('⚠️ Sample audio file not found, using minimal test audio');
+                }
+                
+                // Fallback: Create a proper minimal WAV with 0.5 seconds of silence at 16kHz
+                const sampleRate = 16000;
+                const duration = 0.5; // 0.5 seconds
+                const numSamples = Math.floor(sampleRate * duration);
+                const numChannels = 1;
+                const bytesPerSample = 2;
+                const dataSize = numSamples * numChannels * bytesPerSample;
+                const fileSize = 44 + dataSize;
+                
+                const buffer = new ArrayBuffer(fileSize);
+                const view = new DataView(buffer);
+                
+                // WAV header
+                view.setUint32(0, 0x52494646, false); // "RIFF"
+                view.setUint32(4, fileSize - 8, true); // File size - 8
+                view.setUint32(8, 0x57415645, false); // "WAVE"
+                view.setUint32(12, 0x666d7420, false); // "fmt "
+                view.setUint32(16, 16, true); // Subchunk1Size (PCM)
+                view.setUint16(20, 1, true); // AudioFormat (PCM)
+                view.setUint16(22, numChannels, true); // NumChannels
+                view.setUint32(24, sampleRate, true); // SampleRate
+                view.setUint32(28, sampleRate * numChannels * bytesPerSample, true); // ByteRate
+                view.setUint16(32, numChannels * bytesPerSample, true); // BlockAlign
+                view.setUint16(34, 16, true); // BitsPerSample
+                view.setUint32(36, 0x64617461, false); // "data"
+                view.setUint32(40, dataSize, true); // Subchunk2Size
+                
+                // Fill with silence (zeros) - data starts at byte 44
+                for (let i = 44; i < fileSize; i++) {
+                    view.setUint8(i, 0);
+                }
+                
+                // Convert to base64
+                const uint8Array = new Uint8Array(buffer);
+                let binary = '';
+                const chunkSize = 8192;
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                    const chunk = uint8Array.slice(i, i + chunkSize);
+                    binary += String.fromCharCode.apply(null, chunk);
+                }
+                const base64Audio = btoa(binary);
+                
+                const requestBody = {
+                    audio_data: base64Audio,
+                    language: 'nl',
+                    prompt: 'Dutch dental terminology test',
+                    format: 'wav'
+                };
+
+                await makeRequest('/api/ai/transcribe', 'POST', 'AI Transcription (Minimal Test)', requestBody);
+            } catch (error) {
+                log(`❌ Sample audio test error: ${error.message}`, true);
+            }
         }
 
         async function testTranscribeFile() {
-            // Create a minimal WAV file for testing
-            const wavHeader = new ArrayBuffer(44);
-            const view = new DataView(wavHeader);
+            // Create a proper minimal WAV file with 0.5 seconds of silence for testing
+            const sampleRate = 16000;
+            const duration = 0.5; // 0.5 seconds
+            const numSamples = Math.floor(sampleRate * duration);
+            const numChannels = 1;
+            const bytesPerSample = 2;
+            const dataSize = numSamples * numChannels * bytesPerSample;
+            const fileSize = 44 + dataSize;
+            
+            const buffer = new ArrayBuffer(fileSize);
+            const view = new DataView(buffer);
             
             // WAV header
             view.setUint32(0, 0x52494646, false); // "RIFF"
-            view.setUint32(4, 36, true); // File size - 8
+            view.setUint32(4, fileSize - 8, true); // File size - 8
             view.setUint32(8, 0x57415645, false); // "WAVE"
             view.setUint32(12, 0x666d7420, false); // "fmt "
-            view.setUint32(16, 16, true); // Subchunk1Size
+            view.setUint32(16, 16, true); // Subchunk1Size (PCM)
             view.setUint16(20, 1, true); // AudioFormat (PCM)
-            view.setUint16(22, 1, true); // NumChannels
-            view.setUint32(24, 16000, true); // SampleRate
-            view.setUint32(28, 32000, true); // ByteRate
-            view.setUint16(32, 2, true); // BlockAlign
+            view.setUint16(22, numChannels, true); // NumChannels
+            view.setUint32(24, sampleRate, true); // SampleRate
+            view.setUint32(28, sampleRate * numChannels * bytesPerSample, true); // ByteRate
+            view.setUint16(32, numChannels * bytesPerSample, true); // BlockAlign
             view.setUint16(34, 16, true); // BitsPerSample
             view.setUint32(36, 0x64617461, false); // "data"
-            view.setUint32(40, 0, true); // Subchunk2Size
+            view.setUint32(40, dataSize, true); // Subchunk2Size
             
-            const blob = new Blob([wavHeader], { type: 'audio/wav' });
+            // Fill with silence (zeros) - data starts at byte 44
+            for (let i = 44; i < fileSize; i++) {
+                view.setUint8(i, 0);
+            }
+            
+            const blob = new Blob([buffer], { type: 'audio/wav' });
             const formData = new FormData();
             formData.append('file', blob, 'test.wav');
             formData.append('language', 'nl');
@@ -863,6 +1034,17 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
 
                 if (response.ok) {
                     log(`✅ ${description} successful`);
+                    
+                    // Check if this is a transcription response and display raw/normalized fields prominently
+                    if (data.raw !== undefined && data.normalized !== undefined) {
+                        log('📝 RAW TRANSCRIPTION: ' + data.raw);
+                        log('🔧 NORMALIZED TRANSCRIPTION: ' + data.normalized);
+                        if (data.text !== data.raw) {
+                            log('📄 LEGACY TEXT: ' + data.text);
+                        }
+                        log('📊 Full response details:');
+                    }
+                    
                     log(JSON.stringify(data, null, 2));
                 } else {
                     log(`❌ ${description} failed: ${data.detail || `HTTP ${response.status}`}`, true);

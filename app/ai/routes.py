@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .factory import provider_factory
 from .interfaces import TranscriptionResult, ProviderInfo, ProviderError
+from .normalization import NormalizationPipeline
 from ..pairing.security import SecurityMiddleware
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,9 @@ class TranscriptionRequest(BaseModel):
 
 class TranscriptionResponse(BaseModel):
     """Response model for transcription."""
-    text: str
+    text: str  # Keep for backward compatibility
+    raw: str   # Raw transcription from ASR
+    normalized: str  # Normalized transcription (same as raw for now, until normalization is implemented)
     segments: List[Dict[str, Any]]
     language: Optional[str] = None
     duration: Optional[float] = None
@@ -66,12 +69,35 @@ def get_security_middleware(request: Request) -> SecurityMiddleware:
     return request.app.state.security_middleware
 
 
+def get_normalization_pipeline(request: Request) -> NormalizationPipeline:
+    """Dependency to get normalization pipeline from app state."""
+    return getattr(request.app.state, 'normalization_pipeline', None)
+
+
+async def apply_normalization(
+    text: str, 
+    language: str = "nl",
+    pipeline: NormalizationPipeline = None
+) -> tuple[str, str]:
+    """Apply normalization to text. Returns (raw, normalized)."""
+    if not pipeline or not text.strip():
+        return text, text
+    
+    try:
+        result = pipeline.normalize(text, language=language)
+        return text, result.normalized_text
+    except Exception as e:
+        logger.warning(f"⚠️ Normalization failed: {e}")
+        return text, text
+
+
 # API Endpoints
 @router.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(
     request_data: TranscriptionRequest,
     request: Request,
-    security: SecurityMiddleware = Depends(get_security_middleware)
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    normalization_pipeline: NormalizationPipeline = Depends(get_normalization_pipeline)
 ):
     """Transcribe audio data using the configured ASR provider."""
     # Validate request
@@ -102,6 +128,13 @@ async def transcribe_audio(
             duration=len(audio_bytes) / 32000  # Approximate duration
         )
         
+        # Apply normalization
+        raw_text, normalized_text = await apply_normalization(
+            result.text, 
+            language=request_data.language or "nl",
+            pipeline=normalization_pipeline
+        )
+        
         # Convert segments to dict format
         segments_dict = []
         for segment in result.segments:
@@ -113,7 +146,9 @@ async def transcribe_audio(
             })
         
         return TranscriptionResponse(
-            text=result.text,
+            text=normalized_text,  # Return normalized text as main text field
+            raw=raw_text,  # Raw transcription from ASR
+            normalized=normalized_text,  # Normalized transcription
             segments=segments_dict,
             language=result.language,
             duration=result.duration,
@@ -182,7 +217,9 @@ async def transcribe_file(
             })
         
         return TranscriptionResponse(
-            text=result.text,
+            text=result.text,  # For file upload, keeping raw text for now
+            raw=result.text,  # Raw transcription from ASR
+            normalized=result.text,  # For file upload, keeping raw text for now
             segments=segments_dict,
             language=result.language,
             duration=result.duration,

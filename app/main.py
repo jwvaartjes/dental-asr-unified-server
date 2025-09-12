@@ -14,6 +14,10 @@ from app.pairing import router, websocket_endpoint
 from app.pairing.security import SecurityMiddleware
 from app.lexicon import router as lexicon_router
 from app.ai import ai_router
+from app.ai.normalization import NormalizationFactory
+from app.data.registry import DataRegistry
+from app.data.loaders.loader_supabase import SupabaseLoader
+from app.data.cache.cache_memory import InMemoryCache
 
 # Setup logging
 logging.basicConfig(
@@ -47,8 +51,14 @@ async def lifespan(app: FastAPI):
         await data_registry.hydrate_cache(admin_id)
         logger.info("✅ Cache hydration completed successfully")
         
+        # Initialize normalization pipeline for admin user
+        logger.info("🔄 Initializing normalization pipeline...")
+        pipeline = await NormalizationFactory.create_for_admin(data_registry)
+        app.state.normalization_pipeline = pipeline
+        logger.info("✅ Normalization pipeline initialized successfully")
+        
     except Exception as e:
-        logger.warning(f"⚠️  Cache hydration failed (will continue): {e}")
+        logger.warning(f"⚠️  Startup initialization failed (will continue): {e}")
     
     logger.info("✅ Pairing server startup completed")
     
@@ -69,6 +79,11 @@ def create_app(settings=None) -> FastAPI:
     # Setup dependencies with settings
     deps = setup_dependencies(settings)
     
+    # Construct DataRegistry for normalization
+    cache = InMemoryCache()
+    loader = SupabaseLoader()
+    data_registry = DataRegistry(cache=cache, loader=loader)
+    
     # Create FastAPI app
     app = FastAPI(
         title="Mondplan Speech - Pairing Server", 
@@ -86,7 +101,7 @@ def create_app(settings=None) -> FastAPI:
     app.state.ws_rate_limiter = deps["ws_rate_limiter"]
     app.state.http_rate_limiter = deps["http_rate_limiter"]
     app.state.connection_tracker = deps["connection_tracker"]
-    app.state.data_registry = deps["data_registry"]
+    app.state.data_registry = data_registry
     
     # Configure CORS with environment-specific origins
     app.add_middleware(
@@ -198,7 +213,7 @@ def create_app(settings=None) -> FastAPI:
     @app.get("/api-test")
     async def api_test_suite():
         """Complete API test suite with ALL available endpoints on the unified server."""
-        file_path = os.path.join(os.path.dirname(__file__), "..", "api_test_complete.html")
+        file_path = os.path.join(test_pages_dir, "api_test_complete.html")
         if os.path.exists(file_path):
             with open(file_path, "r", encoding='utf-8') as f:
                 return HTMLResponse(f.read())

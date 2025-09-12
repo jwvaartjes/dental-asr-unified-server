@@ -127,13 +127,24 @@ async def check_email(
     request: Request,
     security: SecurityMiddleware = Depends(get_security_middleware)
 ):
-    """Check if email exists (always returns true for testing)."""
+    """Check if email exists (realistic testing behavior)."""
     await security.validate_request(request)
     
     logger.info(f"Checking email: {email}")
-    if "@" in email:
+    if "@" not in email or "." not in email:
+        return {"exists": False, "message": "Invalid email format"}
+    
+    # For realistic testing: known domains return true, unknown return false
+    known_domains = [
+        "practijk.nl", "dental-asr.com", "mondplan.com", 
+        "tandarts.nl", "gmail.com", "test.com", "example.com"
+    ]
+    domain = email.split("@")[-1].lower()
+    
+    if any(known_domain in domain for known_domain in known_domains):
         return {"exists": True, "message": "Email found"}
-    return {"exists": False, "message": "Invalid email"}
+    else:
+        return {"exists": False, "message": "Email not found"}
 
 
 @router.post("/auth/login-magic")
@@ -153,7 +164,11 @@ async def login_magic(
         return {
             "success": True,
             "token": token,
-            "user": {"email": email, "name": email.split("@")[0]}
+            "user": {
+                "email": email, 
+                "name": email.split("@")[0],
+                "role": "admin" if "@" in email else "user"
+            }
         }
     
     raise HTTPException(status_code=400, detail="Invalid email")
@@ -179,7 +194,11 @@ async def login(
     return {
         "success": True,
         "token": token,
-        "user": {"email": email, "name": email.split("@")[0] if "@" in email else email}
+        "user": {
+            "email": email, 
+            "name": email.split("@")[0] if "@" in email else email,
+            "role": "admin" if "@" in email else "user"
+        }
     }
 
 

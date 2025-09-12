@@ -22,8 +22,10 @@ class SupabaseLoader(LoaderInterface):
     def __init__(self):
         """Initialize Supabase connection via existing manager."""
         try:
-            # Import SupabaseManager from the same directory
-            from .supabase_manager import SupabaseManager
+            # Import SupabaseManager from the main workspace
+            import sys
+            sys.path.append('/Users/janwillemvaartjes/tand-asr-runpod/stable_baseline_workspace')
+            from supabase_manager import SupabaseManager
             
             logger.info("🔄 Initializing SupabaseLoader...")
             self.supabase_mgr = SupabaseManager()
@@ -97,6 +99,10 @@ class SupabaseLoader(LoaderInterface):
         except Exception as e:
             logger.error(f"❌ Failed to save protected words for user {user_id}: {e}")
             return False
+    
+    def get_admin_id(self) -> str:
+        """Get admin user ID from SupabaseManager."""
+        return self.supabase_mgr.get_admin_id()
     
     async def test_connection(self) -> bool:
         """Test if Supabase connection is working."""

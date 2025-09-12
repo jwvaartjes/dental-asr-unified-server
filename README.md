@@ -194,6 +194,104 @@ This unified server replaces functionality from the legacy server (`server_windo
 
 This project is part of the Dental ASR System - proprietary software for dental practice management.
 
+# Normalization Pipeline
+
+De **Normalization Pipeline** zet ruwe transcriptietekst (spraak → tekst) om naar een **gestandaardiseerde medische/dentale representatie**.  
+Dit is nodig omdat patiënten, assistenten en tandartsen dingen op heel veel manieren kunnen zeggen of schrijven, terwijl het systeem één eenduidige vorm nodig heeft.
+
+---
+
+## Waarom een pipeline?
+
+- Transcripties zijn vaak rommelig: cijfers, afkortingen, spelfouten, of woorden die meerdere betekenissen hebben.
+- De pipeline maakt hiervan een **uniforme, voorspelbare tekst** die geschikt is voor opslag, zoekopdrachten en rapportages.
+- Dit gebeurt in een **deterministische flow**: dezelfde input levert altijd dezelfde output.
+
+---
+
+## Belangrijk concept: tokenization
+
+De pipeline werkt niet rechtstreeks op de tekst, maar op **tokens**:
+- **Tokenizer** splitst tekst in woorden, cijfers en interpunctie (`14;15;16` → `14`, `;`, `15`, `;`, `16`).
+- Elk blok in de pipeline werkt op tokens en kan tokens vervangen of samenvoegen.
+- Aan het eind worden de tokens weer netjes samengevoegd tot gewone tekst.
+
+Zonder tokenizer zouden veel stappen niet betrouwbaar zijn:
+- `14;15;16` zou als één woord blijven staan → geen element parsing mogelijk.
+- Fuzzy matching zou ook leestekens meenemen.
+- Multi-woord regels zouden niet kloppen.
+
+---
+
+## Volgorde van de pipeline
+
+De pipeline volgt deze stappen:
+
+0. **Protected words wrappen**  
+   Woorden uit Supabase (“protected words”) worden gemarkeerd en mogen **nooit** aangepast worden.  
+   Voorbeeld: “Paro” blijft altijd “Paro”.
+
+1. **Preprocessing**  
+   - Scheidt separators (`,` `;` `-` `/`) tussen cijfers.  
+   - Bereidt tekst voor op element parsing.  
+   - Nog geen inhoudelijke wijzigingen.
+
+2. **Element parsing (incl. multi-woord)**  
+   - Herkent tandnummers (1–48).  
+   - Zet patronen als `14;15;16` om naar `element 14; element 15; element 16`.  
+   - Speciale regels voor combinaties zoals `element 1, 2` → `element 12`.
+
+3. **Learnable normalization**  
+   - Past door gebruikers/praktijken gedefinieerde regels toe (uit Supabase).  
+   - Kan ook multi-woord regexregels bevatten.  
+   - Voorbeeld: `gingiva` → `tandvlees`.
+
+4. **Variant generation**  
+   - Vervangt afkortingen en spellingvarianten door canonieke vormen.  
+   - Voorbeeld: `parod` → `parodontitis`.  
+   - Zet cijferwoorden om: `vier` → `4`.  
+   - **Altijd vóór fuzzy matching**.
+
+5. **Phonetic/fuzzy matching**  
+   - Vergelijkt tokens met canonieke woorden uit het lexicon.  
+   - Corrigeert spelfouten of verkeerde transcripties.  
+   - Multi-woord combinaties mogelijk: `bot verlies` → `botverlies`.  
+   - Numerieke tokens worden overgeslagen.
+
+6. **Postprocessing**  
+   - Opruimen van spaties en leestekens.  
+   - Dubbele spaties weg, interpunctie strak tegen de woorden.
+
+7. **Protected unwrap**  
+   - Markers rond protected words worden verwijderd.  
+   - Die woorden staan dus exact zoals ze binnenkwamen.
+
+---
+
+## Multi-woord parsing
+
+Multi-woord parsing gebeurt op twee niveaus:
+
+1. **Vroeg in de flow** (Element parsing)  
+   Voor getallenreeksen zoals `1-4`, `1,4`, `14`.
+
+2. **Later in de flow** (Variant/fuzzy matching)  
+   Voor lexicale samenstellingen zoals `bot verlies` → `botverlies`.
+
+---
+
+## Integratie in FastAPI
+
+- **Startup**: `NormalizationFactory` laadt lexicon + config uit Supabase en bouwt de pipeline.  
+- **Request handler**: transcriberesultaat (`raw_text`) gaat door `pipeline.normalize(...)`.  
+- **Response**: naast `raw` en `text` wordt ook `normalized` teruggegeven.
+
+```python
+norm = pipeline.normalize(raw_text, language="nl")
+normalized_text = norm.normalized_text
+
+
+
 ## 🤝 Contributing
 
 This is a private project. For questions or issues, contact the development team.
