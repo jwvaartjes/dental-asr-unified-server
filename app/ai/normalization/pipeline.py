@@ -439,13 +439,9 @@ class NormalizationPipeline:
                 elif isinstance(category_data, dict):
                     # Category contains a dictionary of terms
                     canonicals.extend(category_data.keys())
-                    canonicals.extend(category_data.values())
 
-        # Add custom patterns replacements
-        if hasattr(self.custom_patterns, 'patterns'):
-            for pattern in self.custom_patterns.patterns:
-                if isinstance(pattern, dict) and pattern.get("replacement"):
-                    canonicals.append(pattern["replacement"])
+        # Custom patterns are handled as transformations before fuzzy matching
+        # NOT as fuzzy matching targets, so we don't add them to canonicals
 
         # Store canonicals for phonetic matching
         self.canonicals = [c for c in canonicals if isinstance(c, str)]

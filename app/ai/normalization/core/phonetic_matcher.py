@@ -290,11 +290,16 @@ class DutchPhoneticMatcher:
                     if phonetic_exact_match:
                         break
                 
-                # If phonetic exact match, boost the score significantly
+                # If phonetic exact match, apply gated boost
                 if phonetic_exact_match:
-                    # But still use fuzzy score as base to prefer better fuzzy matches
-                    score = max(score, 0.95)
-                    raw_score = max(raw_score, 0.95)
+                    phonetic_boost_floor = 0.60
+                    min_len_for_boost = 5
+                    
+                    # Only boost if base score is already decent and tokens are long enough
+                    if score >= phonetic_boost_floor and len(input_text) >= min_len_for_boost and len(candidate) >= min_len_for_boost:
+                        # Gentle boost as tie-breaker, not catapult
+                        score = max(score, 0.95)
+                        raw_score = max(raw_score, 0.95)
                 
                 # Additional phonetic similarity bonus
                 soundex_score = self.fuzzy_match(
