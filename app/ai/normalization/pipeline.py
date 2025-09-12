@@ -397,20 +397,23 @@ class NormalizationPipeline:
         try:
             self.phonetic_matcher = DutchPhoneticMatcher(
                 config_data=phon_cfg,
+                tokenizer=self.tokenizer
             )
         except TypeError:
             # Fallback to basic initialization
-            self.phonetic_matcher = DutchPhoneticMatcher()
+            self.phonetic_matcher = DutchPhoneticMatcher(tokenizer=self.tokenizer)
         
-        # Bepaal exact welke methode we moeten aanroepen (géén fallback naar simpele logic)
-        # For DutchPhoneticMatcher, we need to adapt the interface since it requires candidates
-        self._phonetic_call = None
-        
-        # Check for simple methods first (like normalize_text that takes only one argument)
-        if hasattr(self.phonetic_matcher, 'normalize_text') and callable(getattr(self.phonetic_matcher, 'normalize_text')):
+        # Set up phonetic matching using the new normalize method with canonicals
+        if hasattr(self.phonetic_matcher, 'normalize') and callable(getattr(self.phonetic_matcher, 'normalize')):
+            # Create a wrapper that passes canonicals to the normalize method
+            def _phonetic_normalize(text: str) -> str:
+                return self.phonetic_matcher.normalize(text, self.canonicals)
+            self._phonetic_call = _phonetic_normalize
+        elif hasattr(self.phonetic_matcher, 'normalize_text') and callable(getattr(self.phonetic_matcher, 'normalize_text')):
+            # Fallback to old interface if available
             self._phonetic_call = getattr(self.phonetic_matcher, 'normalize_text')
         else:
-            # For now, create a pass-through function if DutchPhoneticMatcher doesn't have compatible interface
+            # Pass-through function as final fallback
             def _passthrough(text: str) -> str:
                 return text
             self._phonetic_call = _passthrough
@@ -444,6 +447,9 @@ class NormalizationPipeline:
                 if isinstance(pattern, dict) and pattern.get("replacement"):
                     canonicals.append(pattern["replacement"])
 
+        # Store canonicals for phonetic matching
+        self.canonicals = [c for c in canonicals if isinstance(c, str)]
+        
         # Build the map
         for canonical in canonicals:
             if isinstance(canonical, str):

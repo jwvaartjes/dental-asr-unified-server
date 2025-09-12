@@ -5,9 +5,30 @@ Phonetic matcher for Dutch dental terms using sound-based matching
 
 import json
 import re
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Iterable
 from difflib import SequenceMatcher
 import unicodedata
+
+
+class _SimpleTokenizer:
+    """Fallback tokenizer when none provided - matches DefaultTokenizer implementation"""
+    _SEP_RE = re.compile(r"(\s+|[.,;:/!?()\[\]{}\-])")
+    
+    def tokenize(self, text: str) -> List[str]:
+        parts: List[str] = []
+        idx = 0
+        for m in self._SEP_RE.finditer(text):
+            if m.start() > idx:
+                parts.append(text[idx:m.start()])
+            parts.append(m.group(0))
+            idx = m.end()
+        if idx < len(text):
+            parts.append(text[idx:])
+        return parts
+    
+    def detokenize(self, tokens: Iterable[str]) -> str:
+        return ''.join(tokens)
+
 
 class DutchPhoneticMatcher:
     """Phonetic matching for Dutch language with dental context"""
@@ -15,7 +36,8 @@ class DutchPhoneticMatcher:
     def __init__(self, config_data: Dict[str, Any] = None, 
                  phonetic_cache: Dict[str, List[str]] = None,
                  soundex_cache: Dict[str, str] = None,
-                 phonetic_index: Dict[str, List[str]] = None):
+                 phonetic_index: Dict[str, List[str]] = None,
+                 tokenizer=None):
         self.config = config_data or {}
         
         matching_config = self.config.get('matching', {})
@@ -27,6 +49,9 @@ class DutchPhoneticMatcher:
         self._phonetic_cache = phonetic_cache or {}
         self._soundex_cache = soundex_cache or {}
         self._phonetic_index = phonetic_index or {}
+        
+        # Initialize tokenizer (fallback to _SimpleTokenizer if none provided)
+        self.tokenizer = tokenizer if tokenizer is not None else _SimpleTokenizer()
         
         # Build phonetic conversion table
         self._build_phonetic_table()
@@ -458,4 +483,51 @@ class DutchPhoneticMatcher:
             self.phonetic_table[sound] = variants
             
         print(f"✅ Default phonetic table built: {len(self.phonetic_table)} patterns")
+    
+    def normalize(self, text: str, canonicals: List[str]) -> str:
+        """
+        Normalize text by replacing misspelled tokens with canonical terms in-place.
+        This is the pipeline-compatible interface that uses fuzzy/phonetic matching.
+        
+        Args:
+            text: Input text to normalize
+            canonicals: List of canonical terms to match against
+            
+        Returns:
+            Text with tokens replaced in-place (no appending)
+        """
+        if not text or not canonicals:
+            return text
+            
+        # Tokenize input text
+        tokens = self.tokenizer.tokenize(text)
+        modified_tokens = []
+        
+        for token in tokens:
+            # Skip punctuation and separators (whitespace, punctuation)
+            if not token.strip() or not token.replace(' ', '').isalpha():
+                modified_tokens.append(token)
+                continue
+                
+            # Clean token for matching (lowercase, strip)
+            clean_token = token.strip().lower()
+            if not clean_token:
+                modified_tokens.append(token)
+                continue
+                
+            # Try to find a match using existing match method
+            match_result = self.match(clean_token, canonicals)
+            
+            if match_result and match_result[1] >= self.fuzzy_threshold:
+                # Replace with the matched canonical term, preserving case if original was capitalized
+                matched_canonical = match_result[0]
+                if token[0].isupper() and matched_canonical:
+                    matched_canonical = matched_canonical[0].upper() + matched_canonical[1:]
+                modified_tokens.append(matched_canonical)
+            else:
+                # No match found, keep original token
+                modified_tokens.append(token)
+        
+        # Detokenize back to string
+        return self.tokenizer.detokenize(modified_tokens)
 
