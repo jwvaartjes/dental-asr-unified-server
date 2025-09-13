@@ -373,6 +373,9 @@
                     <button class="btn ai" onclick="testEndpoint('/api/ai/model-info')">
                         Model Info <span class="endpoint-badge method-get">GET</span>
                     </button>
+                    <button class="btn ai" onclick="testNormalizationConfig()">
+                        Normalization Config <span class="endpoint-badge method-get">GET</span>
+                    </button>
                     <button class="btn ai" onclick="testEndpoint('/api/ai/reload', 'POST')">
                         Reload <span class="endpoint-badge method-post">POST</span>
                     </button>
@@ -1475,6 +1478,58 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
             }
 
             return data;
+        }
+
+        async function testNormalizationConfig() {
+            log('🧠 Testing Normalization Configuration endpoint...');
+            
+            try {
+                const response = await fetch(`${BASE_URL}/api/ai/normalization/config`, {
+                    method: 'GET',
+                    headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                log('✅ Normalization Config loaded successfully!');
+                
+                // Create a formatted display of the configuration
+                const displayArea = document.getElementById('outputArea') || document.body;
+                const configDisplay = document.createElement('div');
+                configDisplay.innerHTML = `
+                    <div style="background: rgba(0,0,0,0.8); color: #00ff00; padding: 20px; margin: 10px 0; border-radius: 8px; font-family: monospace; max-height: 500px; overflow-y: auto;">
+                        <h3 style="color: #4ade80; margin-top: 0;">🗄️ Supabase Configuration for Normalization Pipeline</h3>
+                        <p><strong>Admin User ID:</strong> ${data.admin_user_id}</p>
+                        <p><strong>Data Source:</strong> ${data.data_source}</p>
+                        <p><strong>Timestamp:</strong> ${data.timestamp}</p>
+                        
+                        <h4 style="color: #22d3ee; margin-top: 20px;">⚙️ Configuration Object:</h4>
+                        <pre style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; overflow-x: auto;">${JSON.stringify(data.config, null, 2)}</pre>
+                        
+                        <h4 style="color: #22d3ee; margin-top: 20px;">📖 Lexicon Data:</h4>
+                        <pre style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; overflow-x: auto; max-height: 200px; overflow-y: auto;">${JSON.stringify(data.lexicon, null, 2)}</pre>
+                        
+                        <h4 style="color: #22d3ee; margin-top: 20px;">🎯 Custom Patterns:</h4>
+                        <pre style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; overflow-x: auto;">${JSON.stringify(data.custom_patterns, null, 2)}</pre>
+                        
+                        <h4 style="color: #22d3ee; margin-top: 20px;">🛡️ Protected Words:</h4>
+                        <pre style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; overflow-x: auto;">${JSON.stringify(data.protected_words, null, 2)}</pre>
+                        
+                        <h4 style="color: #22d3ee; margin-top: 20px;">📊 Cache Statistics:</h4>
+                        <pre style="background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; overflow-x: auto;">${JSON.stringify(data.cache_stats, null, 2)}</pre>
+                    </div>
+                `;
+                
+                displayArea.appendChild(configDisplay);
+                log('📋 Configuration displayed in detail below');
+                
+            } catch (error) {
+                log(`❌ Normalization Config error: ${error.message}`, true);
+            }
         }
 
         function showResult(message, isSuccess = true) {

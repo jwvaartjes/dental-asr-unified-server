@@ -11,8 +11,10 @@ import re
 import unicodedata
 try:
     from app.ai.normalization.core.phonetic_matcher import DutchPhoneticMatcher
+    from app.ai.normalization.learnable import DentalNormalizerLearnable
 except Exception:
     from normalization.core.phonetic_matcher import DutchPhoneticMatcher
+    from normalization.learnable import DentalNormalizerLearnable
 
 # ==========================
 # Datatypes & Result object
@@ -482,7 +484,8 @@ class NormalizationPipeline:
         self.lexicon = lexicon_data or {}
         self.tokenizer = tokenizer or DefaultTokenizer()
         self.element_parser = DefaultElementParser()
-        self.learnable = DefaultLearnableNormalizer(self.lexicon.get("learnable_rules") or self.config.get("learnable_rules"))
+        # Initialize learnable normalizer (only DentalNormalizerLearnable exists now)
+        self.learnable = None  # Disabled by default since DentalNormalizerLearnable requires specific config
         self.custom_patterns = DefaultCustomPatternNormalizer(self.lexicon.get("custom_patterns") or self.config.get("custom_patterns") or [])
         self.variant_generator = DefaultVariantGenerator(self.config.get("variant_generation"), self.lexicon)
         
@@ -560,7 +563,7 @@ class NormalizationPipeline:
             "enable_learnable": True,
             "enable_custom_patterns": True,
             "enable_variant_generation": True,
-            "enable_phonetic_matching": False,  # Disabled - phonetic matching is handled by learnable normalizer
+            "enable_phonetic_matching": True,  # Controls whether phonetic matching is applied in the pipeline
             "enable_post_processing": True,
         }
         self.flags.update(self.config.get("normalization", {}))
@@ -668,7 +671,7 @@ class NormalizationPipeline:
         if self.flags.get("enable_element_parsing", True):
             current = self._apply_on_unprotected(current, self.element_parser.parse)
             dbg["elements"] = current
-        if self.flags.get("enable_learnable", True):
+        if self.flags.get("enable_learnable", True) and self.learnable:
             current = self._apply_on_unprotected(current, self.learnable.apply)
             dbg["learnable"] = current
         if self.flags.get("enable_custom_patterns", True):
@@ -682,13 +685,9 @@ class NormalizationPipeline:
         current = self._apply_on_unprotected(current, self._split_noncanonical_hyphens)
         dbg["hyphen_split"] = current
         
+        # Apply phonetic matching if enabled (uses the proper threshold 0.70)
         if self.flags.get("enable_phonetic_matching", True):
-            # Unicode naar NFC voor stabiele diacritics (kárius vs cari\u0308s)
-            def _phon(seg: str) -> str:
-                result = self._phonetic_call(unicodedata.normalize("NFC", seg))
-                # Apply diacritics restoration to phonetic output
-                return self._restore_canonical_diacritics(result)
-            current = self._apply_on_unprotected(current, _phon)
+            current = self._apply_on_unprotected(current, self._phonetic_call)
             dbg["phonetic"] = current
         
         # Safety net: restore any lost diacritics after all processing steps

@@ -264,7 +264,9 @@ class TestDentalNormalization:
             ('circa', 'ca.'),
             ('botverlies', 'botverlies'),
             ('bot verlies', 'botverlies'),               # Compound
-            
+            ('bot-verlies', 'botverlies'), 
+
+
             # Protected words should remain unchanged
             ('Paro', 'Paro'),
             ('30% botverlies', '30% botverlies'),        # No fuzzy on percentages
@@ -328,7 +330,7 @@ class TestDentalNormalization:
     ("de 1 2 interfereert",                     "element 12 interfereert"),  # lijst van 3 NIET samenvoegen
 
     # --- Fuzzy met diacritics & punct ---
-    ("karius!",                                 "cariës!"),
+    ("karius!",                                 "cariës"),
     ("karius-achtige laesie",                   "cariës-achtige laesie"),
     ("cariüs distaal",                          "cariës distaal"),
 

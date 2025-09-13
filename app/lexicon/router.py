@@ -95,7 +95,7 @@ async def add_canonical_term(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/lexicon/remove-canonical")
+@router.delete("/lexicon/remove-canonical")
 async def remove_canonical_term(
     request: LexiconTermRequest,
     admin_user_id: str = Depends(get_admin_user_id),

@@ -147,6 +147,42 @@ class Settings(BaseSettings):
         description="Logging level"
     )
     
+    # OpenAI settings
+    openai_api_key: str = Field(
+        default="",
+        env="OPENAI_API_KEY",
+        description="OpenAI API key"
+    )
+    model_id: str = Field(
+        default="openai/gpt-4o-transcribe",
+        env="MODEL_ID",
+        description="AI model identifier"
+    )
+    
+    # HuggingFace settings
+    hf_token: str = Field(
+        default="",
+        env="HF_TOKEN",
+        description="HuggingFace token"
+    )
+    
+    # Supabase settings
+    supabase_url: str = Field(
+        default="",
+        env="SUPABASE_URL",
+        description="Supabase project URL"
+    )
+    supabase_service_key: str = Field(
+        default="",
+        env="SUPABASE_SERVICE_KEY",
+        description="Supabase service role key"
+    )
+    supabase_anon_key: str = Field(
+        default="",
+        env="SUPABASE_ANON_KEY",
+        description="Supabase anonymous key"
+    )
+    
     @validator("allowed_origins", pre=True)
     def parse_allowed_origins(cls, v):
         """Parse allowed origins from comma-separated string."""

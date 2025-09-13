@@ -73,6 +73,15 @@ class NormalizationFactory:
                 'protect_words': protected_words.get('words', [])
             }
             
+            # Pass pipeline flags to learnable normalizer config
+            # This enables the pipeline's enable_phonetic_matching flag to control 
+            # the phonetic matching in DentalNormalizerLearnable
+            if 'matching' not in config:
+                config['matching'] = {}
+            # Use the pipeline's enable_phonetic_matching flag if available
+            pipeline_phonetic_flag = config.get('normalization', {}).get('enable_phonetic_matching', True)
+            config['matching']['phonetic_enabled'] = pipeline_phonetic_flag
+            
             # Validate required configuration
             vg = (config.get("variant_generation") or {})
             if vg.get("separators") is None or vg.get("element_separators") is None:

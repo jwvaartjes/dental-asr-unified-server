@@ -13,6 +13,7 @@ from .factory import provider_factory
 from .interfaces import TranscriptionResult, ProviderInfo, ProviderError
 from .normalization import NormalizationPipeline
 from ..pairing.security import SecurityMiddleware
+from ..data.registry import DataRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,11 @@ def get_security_middleware(request: Request) -> SecurityMiddleware:
 def get_normalization_pipeline(request: Request) -> NormalizationPipeline:
     """Dependency to get normalization pipeline from app state."""
     return getattr(request.app.state, 'normalization_pipeline', None)
+
+
+def get_data_registry(request: Request) -> DataRegistry:
+    """Dependency to get data registry from app state."""
+    return request.app.state.data_registry
 
 
 async def apply_normalization(
@@ -380,4 +386,45 @@ async def get_model_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get model information"
+        )
+
+
+@router.get("/normalization/config")
+async def get_normalization_config(
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Get complete normalization configuration from Supabase used by the pipeline."""
+    await security.validate_request(request)
+    
+    try:
+        # Use admin user ID for config (same as in main.py startup)
+        admin_id = data_registry.loader.get_admin_id()
+        
+        # Get all configuration data that the normalization pipeline uses
+        config = await data_registry.get_config(admin_id)
+        lexicon = await data_registry.get_lexicon(admin_id)
+        custom_patterns = await data_registry.get_custom_patterns(admin_id)
+        protected_words = await data_registry.get_protected_words(admin_id)
+        
+        # Get cache stats as well
+        cache_stats = await data_registry.get_cache_stats()
+        
+        return {
+            "admin_user_id": admin_id,
+            "config": config,
+            "lexicon": lexicon,
+            "custom_patterns": custom_patterns, 
+            "protected_words": protected_words,
+            "cache_stats": cache_stats,
+            "data_source": "supabase",
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting normalization config: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get normalization configuration: {str(e)}"
         )
