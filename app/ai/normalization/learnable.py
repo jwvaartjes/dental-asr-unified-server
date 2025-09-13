@@ -415,10 +415,20 @@ class DentalNormalizerLearnable:
                 # Fallback to basic match
                 result = matcher.match(text)
                 if result:
-                    # Calculate fuzzy score for comparison
-                    from difflib import SequenceMatcher
-                    score = SequenceMatcher(None, text.lower(), result.lower()).ratio()
-                    all_matches.append((result, category, 'fuzzy', score))
+                    # For phonetic matcher, if it returns None, respect that decision
+                    # The phonetic matcher has already applied its own threshold logic
+                    if hasattr(matcher, 'fuzzy_threshold'):
+                        # This is the phonetic matcher - if it returned a result, 
+                        # it has already passed the threshold, so use it
+                        # Calculate fuzzy score for comparison
+                        from difflib import SequenceMatcher
+                        score = SequenceMatcher(None, text.lower(), result.lower()).ratio()
+                        all_matches.append((result, category, 'phonetic', score))
+                    else:
+                        # For other matchers, calculate fuzzy score for comparison
+                        from difflib import SequenceMatcher
+                        score = SequenceMatcher(None, text.lower(), result.lower()).ratio()
+                        all_matches.append((result, category, 'fuzzy', score))
         
         # If no matches found, return None
         if not all_matches:
@@ -453,12 +463,10 @@ class DentalNormalizerLearnable:
 
     def parse_element(self, text: str) -> Optional[str]:
         """Parse element number from text - smart matching with element_variants"""
-        # Clean the text: lowercase, remove punctuation, normalize spaces
+        # Clean the text: lowercase, normalize spaces
         text_clean = text.lower()
-        # Remove punctuation but KEEP commas, periods, hyphens, and colons (needed for parsing)
-        # Remove only sentence-ending punctuation and semicolons
-        # KEEP colons for element formatting (e.g., "Element 41:")
-        text_clean = re.sub(r'[;!?]', '', text_clean)
+        # Note: Punctuation removal has been moved to postprocessing for configurability
+        # We keep all punctuation here for proper element parsing
         # Keep periods - they prevent number combination just like commas
         # Normalize multiple spaces to single space
         text_clean = ' '.join(text_clean.split())

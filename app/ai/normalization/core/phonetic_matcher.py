@@ -31,6 +31,26 @@ class _SimpleTokenizer:
 
 
 class DutchPhoneticMatcher:
+
+    # Morphological suffix families to avoid cross-family boosts (e.g., -um vs -air)
+    MORPH_FAMILIES = {
+        "latin_noun": ("um", "us", "a"),
+        "adjective": ("air", "aal", "eel", "ief", "oor", "air", "air"),  # dutch adj endings (approx)
+        "verb_like": ("eer", "eren", "eert", "eerde", "ering"),
+    }
+    def _suffix_family(self, w: str) -> str:
+        wl = w.lower()
+        for fam, endings in self.MORPH_FAMILIES.items():
+            for suf in endings:
+                if wl.endswith(suf) and len(wl) >= len(suf)+3:
+                    return fam
+        return "other"
+    def _families_compatible(self, a: str, b: str) -> bool:
+        fa, fb = self._suffix_family(a), self._suffix_family(b)
+        # Allow same family or 'other'. Block latin_noun vs adjective/verb_like swaps
+        blocked = {("latin_noun","adjective"),("latin_noun","verb_like"),
+                   ("adjective","latin_noun"),("verb_like","latin_noun")}
+        return (fa, fb) not in blocked
     """Phonetic matching for Dutch language with dental context"""
     
     # Generic dental prefixes that should not dominate similarity scoring
@@ -85,7 +105,7 @@ class DutchPhoneticMatcher:
         self.config = config_data or {}
         
         matching_config = self.config.get('matching', {})
-        self.fuzzy_threshold = matching_config.get('fuzzy_threshold', 0.8)
+        self.fuzzy_threshold = matching_config.get('fuzzy_threshold', 0.84)
         self.phonetic_enabled = matching_config.get('phonetic_enabled', True)
         self.max_edit_distance = matching_config.get('max_edit_distance', 2)
         self.boost_top_epsilon = matching_config.get('boost_top_epsilon', 0.0)
@@ -361,8 +381,12 @@ class DutchPhoneticMatcher:
             is_top = (best_base - r["base"]) <= self.boost_top_epsilon
             
             # Only apply phonetic boost to top candidates
+            # Reject boosts that cross morphological families
+            if is_top and r["phonetic_match"] and not self._families_compatible(input_text, r["candidate"]):
+                r["phonetic_match"] = False  # block boost
+
             if is_top and r["phonetic_match"] and self.phonetic_enabled:
-                phonetic_boost_floor = 0.60
+                phonetic_boost_floor = 0.70
                 min_len_for_boost = 5
                 
                 # Only boost if base score is already decent and tokens are long enough
@@ -372,10 +396,7 @@ class DutchPhoneticMatcher:
                     
                     # Blend with Soundex score
                     r["final"] = (r["final"] + r["soundex"] * 0.3) / 1.3
-            elif self.phonetic_enabled:
-                # Non-boosted candidates still get Soundex blend if phonetic match
-                if r["phonetic_match"]:
-                    r["final"] = (r["final"] + r["soundex"] * 0.3) / 1.3
+            # No Soundex blend for non-top candidates
         
         # Find best final score
         best_row = max(cand_rows, key=lambda x: x["final"])
@@ -581,7 +602,7 @@ class DutchPhoneticMatcher:
                 
             # Clean token for matching (lowercase, strip)
             clean_token = token.strip().lower()
-            if not clean_token:
+            if not clean_token or len(clean_token) <= 2:
                 modified_tokens.append(token)
                 continue
                 

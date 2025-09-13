@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 import re
 import unicodedata
-from app.ai.normalization.core.phonetic_matcher import DutchPhoneticMatcher
+try:
+    from app.ai.normalization.core.phonetic_matcher import DutchPhoneticMatcher
+except Exception:
+    from normalization.core.phonetic_matcher import DutchPhoneticMatcher
 
 # ==========================
 # Datatypes & Result object
@@ -27,10 +30,10 @@ class NormalizationResult:
 
 _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?%?$")
 # Unit guard: detect units that follow numbers (prevent element conversion for measurements)
-_UNIT_AFTER_RE = re.compile(r'^\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f)\b', re.IGNORECASE)
+_UNIT_AFTER_RE = re.compile(r'^\\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)\\b', re.IGNORECASE)
 # 1) Algemeen paar 1..4 + 1..8, maar niet als er al 'element ' vóór staat
 _ELEMENT_SIMPLE_RE = re.compile(
-    r"(?<!\belement\s)(?<![1-8] , )(?<![1-8], )(?<![1-8] ,)(?<![1-8],)\b([1-4])\s*[\- ,]?\s*([1-8])\b(?!\s*,\s*[1-8]\b)",
+    r"(?<!\belement\s)\b([1-4])\s*(?:-\s*|,\s+|\s+)?([1-8])\b(?!\s*,\s*[1-8]\b)",
     re.IGNORECASE
 )
 _ELEMENT_LIST_FIX_RE = re.compile(r"\belement\s+([1-4])\s*[, ]\s*([1-8])\b", re.IGNORECASE)
@@ -43,6 +46,82 @@ _DE_ELEMENT_RE = re.compile(r"\bde\s+(?:element\s+)?([1-4])\s*[, \-]?\s*([1-8])\
 # 5) General patterns (element parsing only for now) 
 # Note: Complex negative lookbehind removed due to variable width limitations
 
+
+# --- gedeelde token-aware vervanger (voor variants & custom patterns) ---
+class TokenAwareReplacer:
+    """
+    Eén engine voor literal en regex vervangingen:
+    - literal 'src' → token-aware (spatie of '-'), met trailing punct preserve
+    - regex 'pattern' → gebruikt zoals aangeleverd; optioneel punct-preserve via named group (?P<_p>...)
+    """
+    def __init__(self, rules: list[dict] | dict | None, *, literal_key="src", dst_key="dst",
+                 regex_key="pattern", flags_key="flags", preserve_key="preserve_punct",
+                 sort_longest_first: bool = True):
+        self._re = re
+        self.compiled: list[tuple[re.Pattern, str, bool]] = []
+        if not rules:
+            return
+        # mapping {k:v} → [{"src":k,"dst":v}, ...]
+        if isinstance(rules, dict):
+            rules = [{"src": k, "dst": v} for k, v in rules.items()]
+        # sorteer langste eerst (en meest woorden)
+        if sort_longest_first:
+            def _key(r):
+                s = r.get(literal_key) or r.get(regex_key) or ""
+                return (-len(str(s)), -(len(str(s).split())))
+            rules = sorted(rules, key=_key)
+        for r in rules:
+            # (1) regexregel
+            if isinstance(r.get(regex_key), str):
+                flags = r.get(flags_key, "")
+                f = self._re.IGNORECASE if "i" in str(flags).lower() else 0
+                try:
+                    rx = self._re.compile(r[regex_key], f)
+                except self._re.error:
+                    continue
+                dst = str(r.get("replace", r.get(dst_key, "")))
+                preserve = bool(r.get(preserve_key, False))
+                self.compiled.append((rx, dst, preserve))
+                continue
+            # (2) literal 'src'
+            if isinstance(r.get(literal_key), str):
+                rx = self._compile_literal(r[literal_key])
+                dst = str(r.get(dst_key, ""))
+                self.compiled.append((rx, dst, True))
+                continue
+
+    @staticmethod
+    def _flex_gap() -> str:
+        # spaties of koppelteken (incl. extra spaties rondom '-')
+        return r"(?:\s*-\s*|\s+)"
+
+    def _compile_literal(self, src: str) -> re.Pattern:
+        s = (src or "").strip()
+        if not s:
+            return self._re.compile(r"(?!x)")
+        toks = s.split()
+        if len(toks) == 1:
+            return self._re.compile(rf"(?i)\b{self._re.escape(s)}\b([^\w\s\-\/]*)")
+        body = self._flex_gap().join(self._re.escape(t) for t in toks)
+        return self._re.compile(rf"(?i)\b{body}\b([^\w\s\-\/]*)")
+
+    @staticmethod
+    def _suffix_from_match(m: re.Match) -> str:
+        if "_p" in m.re.groupindex:
+            return m.group("_p") or ""
+        try:
+            return (m.group(m.lastindex) or "") if m.lastindex else ""
+        except IndexError:
+            return ""
+
+    def apply(self, text: str) -> str:
+        out = text
+        for rx, dst, preserve in self.compiled:
+            if preserve:
+                out = rx.sub(lambda m: f"{dst}{self._suffix_from_match(m)}", out)
+            else:
+                out = rx.sub(dst, out)
+        return out
 # --------------------------
 # Protected Words Guard
 # --------------------------
@@ -207,108 +286,33 @@ class DefaultLearnableNormalizer:
         return out
 
 class DefaultCustomPatternNormalizer:
-    """
-    Enhanced custom pattern normalizer with Unicode normalization and smart punctuation handling.
-    
-    Features:
-    - Handles both Supabase format and direct dict patterns
-    - Unicode NFC normalization before pattern matching
-    - Smart punctuation preservation for compound words (karius-achtige → cariës-achtige)
-    - Patterns sorted by length (longer patterns processed first)
-    """
-    
     def __init__(self, patterns=None, preserve_punctuation=True):
-        self.patterns = []
-        self.preserve_punctuation = preserve_punctuation
-        
-        if patterns:
-            if isinstance(patterns, dict):
-                # Handle Supabase format: {"direct_mappings": {...}, "multi_word_mappings": {...}}
-                if 'direct_mappings' in patterns or 'multi_word_mappings' in patterns:
-                    # Process direct_mappings
-                    direct_mappings = patterns.get('direct_mappings', {})
-                    if isinstance(direct_mappings, dict):
-                        for k, v in direct_mappings.items():
-                            if isinstance(v, str):
-                                self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
-                    
-                    # Process multi_word_mappings  
-                    multi_word_mappings = patterns.get('multi_word_mappings', {})
-                    if isinstance(multi_word_mappings, dict):
-                        for k, v in multi_word_mappings.items():
-                            if isinstance(v, str):
-                                self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
-                else:
-                    # Handle simple dict format: {"pattern": "replacement"}
-                    for k, v in patterns.items():
-                        if isinstance(v, str):
-                            self.patterns.append({"pattern": k, "replacement": v, "type": "exact"})
-            elif isinstance(patterns, list):
-                # Handle list format: [{"pattern": "...", "replacement": "...", "type": "..."}]
-                self.patterns = patterns
-        
-        # Sort patterns by length (longer patterns first to prevent short matches from overriding longer ones)
-        self.patterns.sort(key=lambda p: len(p.get("pattern", "")), reverse=True)
-    
-    def _nfc(self, text: str) -> str:
-        return unicodedata.normalize("NFC", text)
-    
+        # Accept dict formats from Supabase or list of rules
+        rules = []
+        if isinstance(patterns, dict):
+            # Supabase style: direct_mappings + multi_word_mappings
+            dm = patterns.get('direct_mappings', {}) if patterns else {}
+            mw = patterns.get('multi_word_mappings', {}) if patterns else {}
+            if isinstance(dm, dict):
+                for k, v in dm.items():
+                    rules.append({'src': k, 'dst': v})
+            if isinstance(mw, dict):
+                for k, v in mw.items():
+                    rules.append({'src': k, 'dst': v})
+        elif isinstance(patterns, list):
+            # Already rule-like entries (may contain 'pattern')
+            rules = patterns
+        elif patterns:
+            # Treat as simple mapping
+            try:
+                for k, v in dict(patterns).items():
+                    rules.append({'src': k, 'dst': v})
+            except Exception:
+                rules = []
+        self._replacer = TokenAwareReplacer(rules)
+
     def apply(self, text: str) -> str:
-        """
-        Apply custom pattern transformations with Unicode normalization and smart punctuation handling.
-        
-        Args:
-            text: Input text to transform
-            
-        Returns:
-            Transformed text with pattern replacements applied
-        """
-        if not self.patterns:
-            return text
-        
-        # Apply Unicode NFC normalization first for consistent diacritic matching
-        out = self._nfc(text)
-        
-        for pattern_data in self.patterns:
-            # Handle both dict and string replacements safely
-            pattern = pattern_data.get("pattern", "")
-            replacement = pattern_data.get("replacement", "")
-            pattern_type = pattern_data.get("type", "exact")
-            
-            # Skip invalid entries
-            if not pattern or not isinstance(replacement, str):
-                continue
-                
-            if pattern_type == "exact":
-                if self.preserve_punctuation:
-                    # Smart punctuation preservation: keep hyphens and slashes for compound words
-                    # "karius-achtige" → "cariës-achtige" (hyphen preserved)
-                    # "karius/achtige" → "cariës/achtige" (slash preserved) 
-                    # "karius!" → "cariës" (punctuation removed)
-                    
-                    # One pass: match pattern and capture trailing punctuation
-                    # Keep hyphens and slashes, remove other punctuation
-                    def repl_func(m):
-                        trailing_punct = m.group(1) if m.group(1) else ""
-                        # Keep only hyphens and slashes, remove other punctuation
-                        preserved_punct = ''.join(c for c in trailing_punct if c in '-/')
-                        # Use NFC normalized replacement to preserve accents
-                        return unicodedata.normalize("NFC", replacement) + preserved_punct
-                    
-                    pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
-                    out = pattern_re.sub(repl_func, out)
-                else:
-                    # Original behavior: remove all punctuation after matches
-                    pattern_re = re.compile(rf"\b{re.escape(pattern)}([^\w\s]*)", re.IGNORECASE)
-                    out = pattern_re.sub(replacement, out)
-            elif pattern_type == "regex":
-                try:
-                    pattern_re = re.compile(pattern, re.IGNORECASE)
-                    out = pattern_re.sub(replacement, out)
-                except re.error:
-                    continue
-        
-        return out
+        return self._replacer.apply(text)
 
 class DefaultVariantGenerator:
     def __init__(self, config: Dict[str, Any] | None, lexicon_data: Dict[str, Any] | None):
@@ -316,10 +320,9 @@ class DefaultVariantGenerator:
         self.separators: List[str] = list(cfg.get("separators", ["-", " ", ",", ";", "/"]))
         self.element_separators: List[str] = list(cfg.get("element_separators", ["-", " ", ",", ";", "/"]))
         self.digit_words: Dict[str, str] = dict(cfg.get("digit_words", {}))
-        variants = (lexicon_data or {}).get("variants", {})
-        self.variant_pairs: List[Tuple[re.Pattern, str]] = [
-            (re.compile(re.escape(k), re.IGNORECASE), v) for k, v in sorted(variants.items(), key=lambda kv: -len(kv[0]))
-        ]
+        variants = {**(config or {}).get('variants', {}), **((lexicon_data or {}).get('variants', {}))}
+        # Gebruik gedeelde engine
+        self._replacer = TokenAwareReplacer(variants)
 
     def _replace_digit_words(self, text: str) -> str:
         t = text
@@ -348,7 +351,7 @@ class DefaultVariantGenerator:
         """Ensure consistent spacing around separators between digits"""
         t = text
         for sep in separators:
-            if sep != " ":
+            if sep not in (' ', '-'):
                 # Pattern: digit + optional spaces + separator + optional spaces + digit
                 # Replace with: digit + space + separator + space + digit
                 pattern = rf"(\b[1-9]\b)\s*{re.escape(sep)}\s*(\b[1-9]\b)"
@@ -359,8 +362,7 @@ class DefaultVariantGenerator:
     def generate(self, text: str) -> str:
         t = self._replace_digit_words(text)
         t = self._space_separators_between_digits(t, self.element_separators)
-        for rx, rep in self.variant_pairs:
-            t = rx.sub(rep, t)
+        t = self._replacer.apply(t)
         return t
 
 class DefaultPhoneticMatcher:
@@ -396,13 +398,31 @@ class DefaultPhoneticMatcher:
         return self.tokenizer.detokenize(out)
 
 class DefaultPostProcessor:
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize with optional postprocessing configuration
+        
+        Args:
+            config: Dict with postprocessing options:
+                - remove_exclamations: bool (default False)
+                - remove_question_marks: bool (default False)
+                - remove_semicolons: bool (default False)
+                - remove_trailing_dots: bool (default False)
+                - remove_trailing_word_commas: bool (default False)
+        """
+        self.config = config or {}
+        
     def apply(self, text: str) -> str:
         t = re.sub(r"\s+([,;:])", r"\1", text)
         t = re.sub(r"([(/\[])\s+", r"\1", t)
         t = re.sub(r"\s+([)\]/])", r"\1", t)  # let op: gebruik 't', niet 'text'
+        # Collapse spaces around hyphens in numeric ranges: '1 - 4' -> '1-4'
+        t = re.sub(r'(?<=\d)\s*-\s*(?=\d)', '-', t)
         t = re.sub(r"\s{2,}", " ", t)
         
-        # Unit compaction: remove spaces between numbers and units
+        
+        # Remove ! and sentence dots (but keep decimal/thousand separators)
+        t = re.sub(r"\s{2,}", " ", t)
+# Unit compaction: remove spaces between numbers and units
         # Symbolic units (% and temperature units)
         t = re.sub(r'(?<=\d)\s+(?=(?:%|‰|°c|°f))', '', t, flags=re.IGNORECASE)
         # Alphabetic units (mm, cm, mg, etc.)
@@ -414,6 +434,42 @@ class DefaultPostProcessor:
         t = t.replace(" de element ", " element ")
         if t.startswith("de element "):
             t = t[3:]
+        
+        # Configurable punctuation removal with safer patterns
+        
+        # -- Optioneel: uitroeptekens weg --
+        if self.config.get('remove_exclamations', False):
+            t = t.replace("!", "")
+        
+        if self.config.get('remove_question_marks', False):
+            t = re.sub(r'\?', '', t)
+        
+        if self.config.get('remove_semicolons', False):
+            t = re.sub(r';', '', t)
+        
+        # -- Optioneel: trailing komma's weg (alleen aan EOL), spaart decimalen/lijsten --
+        #   'karius,' -> 'cariës'
+        #   '1,5 jaar' blijft intact; '1, 2, 3' blijft intact
+        if self.config.get('remove_trailing_commas_eol', False):
+            t = re.sub(r',\s*$', '', t)
+        
+        # -- Optioneel: zinseinde-punten weg, maar laat decimalen ('0.5') staan --
+        if self.config.get('remove_sentence_dots', False):
+            t = re.sub(r'(?<!\d)\.(?!\d)', '', t)
+        
+        # Keep existing trailing word comma removal for backwards compatibility
+        if self.config.get('remove_trailing_dots', False):
+            # Remove sentence-ending dots (not decimal points)
+            # Only remove dots at word boundaries, not in numbers
+            t = re.sub(r'(?<!\d)\.(?!\d)', '', t)
+        
+        if self.config.get('remove_trailing_word_commas', False):
+            # Remove commas after letters when followed by space or end of string
+            t = re.sub(r'(?<=[A-Za-zÀ-ÿ]),(?=\s|$)', '', t)
+        
+        # Final cleanup: collapse any double spaces created by punctuation removal
+        t = re.sub(r'\s{2,}', ' ', t)
+        
         return t.strip()
 
 # ==========================
@@ -427,7 +483,7 @@ class NormalizationPipeline:
         self.tokenizer = tokenizer or DefaultTokenizer()
         self.element_parser = DefaultElementParser()
         self.learnable = DefaultLearnableNormalizer(self.lexicon.get("learnable_rules") or self.config.get("learnable_rules"))
-        self.custom_patterns = DefaultCustomPatternNormalizer(self.lexicon.get("custom_patterns"))
+        self.custom_patterns = DefaultCustomPatternNormalizer(self.lexicon.get("custom_patterns") or self.config.get("custom_patterns") or [])
         self.variant_generator = DefaultVariantGenerator(self.config.get("variant_generation"), self.lexicon)
         
         # Geavanceerde multi-woord matcher (zoals oude systeem) — zonder fallback
@@ -455,15 +511,11 @@ class NormalizationPipeline:
             def _phonetic_normalize(text: str) -> str:
                 return self.phonetic_matcher.normalize(text, self.canonicals)
             self._phonetic_call = _phonetic_normalize
-        elif hasattr(self.phonetic_matcher, 'normalize_text') and callable(getattr(self.phonetic_matcher, 'normalize_text')):
-            # Fallback to old interface if available
-            self._phonetic_call = getattr(self.phonetic_matcher, 'normalize_text')
         else:
-            # Pass-through function as final fallback
-            def _passthrough(text: str) -> str:
-                return text
-            self._phonetic_call = _passthrough
-        self.postprocessor = DefaultPostProcessor()
+            raise RuntimeError('DutchPhoneticMatcher must expose normalize(text, canonicals)')
+        # Initialize postprocessor with config
+        postprocess_config = self.config.get('postprocess', {})
+        self.postprocessor = DefaultPostProcessor(postprocess_config)
         self.protected_words = self.lexicon.get("protected_words") or self.config.get("protected_words") or []
         self.guard = ProtectedWordsGuard(self.protected_words)
         
@@ -508,7 +560,7 @@ class NormalizationPipeline:
             "enable_learnable": True,
             "enable_custom_patterns": True,
             "enable_variant_generation": True,
-            "enable_phonetic_matching": True,
+            "enable_phonetic_matching": False,  # Disabled - phonetic matching is handled by learnable normalizer
             "enable_post_processing": True,
         }
         self.flags.update(self.config.get("normalization", {}))
@@ -609,6 +661,7 @@ class NormalizationPipeline:
 
     def normalize(self, text: str, language: str = "nl") -> NormalizationResult:
         dbg: Dict[str, Any] = {"language": language, "input": text}
+        text = unicodedata.normalize('NFC', text)
         current = self.guard.wrap(text)
         current = current.replace("\u00A0", " ")  # NBSP → spatie
         dbg["protected_wrap"] = current
