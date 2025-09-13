@@ -323,7 +323,9 @@ class DefaultVariantGenerator:
         self.element_separators: List[str] = list(cfg.get("element_separators", ["-", " ", ",", ";", "/"]))
         self.digit_words: Dict[str, str] = dict(cfg.get("digit_words", {}))
         variants = {**(config or {}).get('variants', {}), **((lexicon_data or {}).get('variants', {}))}
-        # Gebruik gedeelde engine
+        # Gebruik gedeelde engine - IMPORTANT: TokenAwareReplacer expects the SOURCE (what to match) as the key
+        # But Supabase stores it as "bot verlies" → "botverlies" where the key is what we want to match
+        # So we DON'T need to reverse, the mapping is already correct
         self._replacer = TokenAwareReplacer(variants)
 
     def _replace_digit_words(self, text: str) -> str:
