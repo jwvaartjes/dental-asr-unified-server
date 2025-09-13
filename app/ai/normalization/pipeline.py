@@ -55,7 +55,7 @@ class ProtectedWordsGuard:
         self.words = [w for w in (protected_words or []) if isinstance(w, str) and w.strip()]
         if self.words:
             alt = "|".join(sorted(map(re.escape, self.words), key=len, reverse=True))
-            self.rx = re.compile(rf"\b(?:{alt})\b(?=[,.;:!?)\]]|$)", re.IGNORECASE)
+            self.rx = re.compile(rf"\b(?:{alt})\b", re.IGNORECASE)
         else:
             self.rx = None
 

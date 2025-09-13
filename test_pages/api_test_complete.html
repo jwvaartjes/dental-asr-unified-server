@@ -469,6 +469,96 @@
                 </div>
             </div>
 
+            <!-- Smart Variant Management -->
+            <div class="api-section">
+                <h3>🧠 Smart Variant Management (Auto-Detection)</h3>
+                
+                <div class="endpoint-group">
+                    <h4>🔍 Find Canonical Term Info</h4>
+                    <div class="input-group">
+                        <label for="canonicalLookup">Canonical Term:</label>
+                        <input type="text" id="canonicalLookup" value="cariës" placeholder="Enter canonical term to find its category">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="findCanonicalTerm()" style="background: linear-gradient(45deg, #06b6d4, #0891b2);">
+                            🔍 Find Category <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                    </div>
+                    <div id="canonicalInfo" style="margin-top: 10px; padding: 10px; background: rgba(6, 182, 212, 0.1); border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.3); display: none;">
+                        <!-- Canonical term info will be displayed here -->
+                    </div>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>🔗 Add Smart Variant (Auto-Category)</h4>
+                    <div class="input-group">
+                        <label for="smartCanonical">Canonical Term:</label>
+                        <input type="text" id="smartCanonical" value="cariës" placeholder="Existing canonical term">
+                    </div>
+                    <div class="input-group">
+                        <label for="smartVariant">Variant/Abbreviation:</label>
+                        <input type="text" id="smartVariant" value="kar" placeholder="Short form or abbreviation">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="addVariantSmart()" style="background: linear-gradient(45deg, #8b5cf6, #7c3aed);">
+                            🧠 Add Smart Variant <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>📝 Add Smart Multi-Word Variant</h4>
+                    <div class="input-group">
+                        <label for="smartMultiwordCanonical">Canonical Term:</label>
+                        <input type="text" id="smartMultiwordCanonical" value="cariës" placeholder="Existing canonical term">
+                    </div>
+                    <div class="input-group">
+                        <label for="smartMultiwordPhrase">Multi-Word Phrase:</label>
+                        <input type="text" id="smartMultiwordPhrase" value="tandbederf vlekjes" placeholder="Multi-word phrase that maps to canonical">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="addMultiwordVariantSmart()" style="background: linear-gradient(45deg, #f59e0b, #d97706);">
+                            🧠 Add Smart Multi-Word <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="endpoint-group">
+                    <h4>📋 Manual Variant Management (Legacy)</h4>
+                    <div class="input-group">
+                        <label for="variantCanonical">Canonical Term:</label>
+                        <input type="text" id="variantCanonical" value="cariës" placeholder="Existing canonical term">
+                    </div>
+                    <div class="input-group">
+                        <label for="variantText">Variant/Abbreviation:</label>
+                        <input type="text" id="variantText" value="kar" placeholder="Short form or abbreviation">
+                    </div>
+                    <div class="input-group">
+                        <label for="variantCategory">Category:</label>
+                        <select id="variantCategorySelect" style="width: 100%; padding: 8px 12px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 6px; background: rgba(255, 255, 255, 0.05); color: #e0e0e0; font-size: 14px; margin-bottom: 5px;">
+                            <option value="">-- Select Category --</option>
+                            <option value="oral_findings">oral_findings</option>
+                            <option value="tooth_surfaces">tooth_surfaces</option>
+                            <option value="treatments">treatments</option>
+                            <option value="materials">materials</option>
+                            <option value="anatomical">anatomical</option>
+                        </select>
+                        <input type="text" id="variantCategory" value="oral_findings" placeholder="Or enter custom category name">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <button class="btn lexicon" onclick="addVariant()" style="background: linear-gradient(45deg, #64748b, #475569);">
+                            🔗 Add Manual Variant <span class="endpoint-badge method-post">POST</span>
+                        </button>
+                        <button class="btn lexicon" onclick="removeVariant()" style="background: linear-gradient(45deg, #dc2626, #b91c1c);">
+                            ❌ Remove Variant <span class="endpoint-badge method-delete">DELETE</span>
+                        </button>
+                        <button class="btn lexicon" onclick="getVariants()" style="background: linear-gradient(45deg, #059669, #047857);">
+                            📋 Get Variants <span class="endpoint-badge method-get">GET</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Protected Words -->
             <div class="api-section">
                 <h3>🛡️ Protected Words</h3>
@@ -1094,6 +1184,190 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
             });
         }
 
+        // Smart Variant Management Functions (Auto-Detection)
+        async function findCanonicalTerm() {
+            const canonicalTerm = document.getElementById('canonicalLookup').value.trim();
+            
+            if (!canonicalTerm) {
+                showResult('❌ Please enter a canonical term', false);
+                return;
+            }
+            
+            try {
+                const response = await makeAPICall('/api/lexicon/find-canonical', 'POST', {
+                    canonical_term: canonicalTerm
+                });
+                
+                const resultDiv = document.getElementById('canonicalInfo');
+                
+                if (response.success) {
+                    resultDiv.innerHTML = `
+                        <h4>📍 Canonical Term Found</h4>
+                        <p><strong>Term:</strong> ${response.canonical_term}</p>
+                        <p><strong>Category:</strong> ${response.category}</p>
+                        <p><strong>Existing Variants:</strong> ${response.variant_count}</p>
+                        ${Object.keys(response.existing_variants).length > 0 ? 
+                            `<div style="margin-top: 10px;">
+                                <strong>Current Variants:</strong>
+                                <ul style="margin: 5px 0; padding-left: 20px;">
+                                    ${Object.entries(response.existing_variants).map(([variant, canonical]) => 
+                                        `<li>"${variant}" → "${canonical}"</li>`
+                                    ).join('')}
+                                </ul>
+                            </div>` : 
+                            '<p><em>No variants found for this term.</em></p>'
+                        }
+                    `;
+                    resultDiv.style.display = 'block';
+                    resultDiv.style.background = 'rgba(34, 197, 94, 0.1)';
+                    resultDiv.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+                    
+                    // Auto-populate smart variant fields
+                    document.getElementById('smartCanonical').value = response.canonical_term;
+                    document.getElementById('smartMultiwordCanonical').value = response.canonical_term;
+                    
+                    showResult(`✅ Found: "${response.canonical_term}" in category "${response.category}"`, true);
+                } else {
+                    resultDiv.innerHTML = `
+                        <h4>❌ Term Not Found</h4>
+                        <p>${response.message}</p>
+                        <p><em>Make sure the canonical term exists in the lexicon first.</em></p>
+                    `;
+                    resultDiv.style.display = 'block';
+                    resultDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+                    resultDiv.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                    
+                    showResult(`❌ ${response.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error finding canonical term: ${error.message}`, false);
+                document.getElementById('canonicalInfo').style.display = 'none';
+            }
+        }
+
+        async function addVariantSmart() {
+            const canonicalTerm = document.getElementById('smartCanonical').value.trim();
+            const variant = document.getElementById('smartVariant').value.trim();
+            
+            if (!canonicalTerm || !variant) {
+                showResult('❌ Please enter both canonical term and variant', false);
+                return;
+            }
+            
+            try {
+                const response = await makeAPICall('/api/lexicon/add-variant-auto', 'POST', {
+                    canonical_term: canonicalTerm,
+                    variant: variant
+                });
+                
+                if (response.success) {
+                    showResult(`✅ ${response.message}`, true);
+                    
+                    // Clear the variant field for next entry
+                    document.getElementById('smartVariant').value = '';
+                    
+                    // Refresh canonical info if visible
+                    const infoDiv = document.getElementById('canonicalInfo');
+                    if (infoDiv.style.display !== 'none') {
+                        findCanonicalTerm();
+                    }
+                } else {
+                    showResult(`❌ ${response.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error adding smart variant: ${error.message}`, false);
+            }
+        }
+
+        async function addMultiwordVariantSmart() {
+            const canonicalTerm = document.getElementById('smartMultiwordCanonical').value.trim();
+            const variantPhrase = document.getElementById('smartMultiwordPhrase').value.trim();
+            
+            if (!canonicalTerm || !variantPhrase) {
+                showResult('❌ Please enter both canonical term and multi-word phrase', false);
+                return;
+            }
+            
+            try {
+                const response = await makeAPICall('/api/lexicon/add-multiword-variant-auto', 'POST', {
+                    canonical_term: canonicalTerm,
+                    variant_phrase: variantPhrase
+                });
+                
+                if (response.success) {
+                    showResult(`✅ ${response.message}`, true);
+                    
+                    // Clear the phrase field for next entry
+                    document.getElementById('smartMultiwordPhrase').value = '';
+                    
+                    // Refresh canonical info if visible
+                    const infoDiv = document.getElementById('canonicalInfo');
+                    if (infoDiv.style.display !== 'none') {
+                        findCanonicalTerm();
+                    }
+                } else {
+                    showResult(`❌ ${response.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error adding smart multi-word variant: ${error.message}`, false);
+            }
+        }
+
+        // Variant Management Functions
+        async function addVariant() {
+            const canonical = document.getElementById('variantCanonical').value || 'cariës';
+            const variant = document.getElementById('variantText').value || 'kar';
+            const category = document.getElementById('variantCategory').value || document.getElementById('variantCategorySelect').value || 'oral_findings';
+            
+            await makeRequest('/api/lexicon/add-variant', 'POST', 'Add Variant', {
+                canonical_term: canonical,
+                variant: variant,
+                category: category
+            });
+        }
+
+        async function removeVariant() {
+            const canonical = document.getElementById('variantCanonical').value || 'cariës';
+            const variant = document.getElementById('variantText').value || 'kar';
+            const category = document.getElementById('variantCategory').value || document.getElementById('variantCategorySelect').value || 'oral_findings';
+            
+            await makeRequest('/api/lexicon/remove-variant', 'DELETE', 'Remove Variant', {
+                canonical_term: canonical,
+                variant: variant,
+                category: category
+            });
+        }
+
+        async function getVariants() {
+            const category = document.getElementById('variantCategory').value || document.getElementById('variantCategorySelect').value || 'oral_findings';
+            
+            await makeRequest(`/api/lexicon/variants/${encodeURIComponent(category)}`, 'GET', 'Get Variants');
+        }
+
+        async function addMultiwordVariant() {
+            const canonical = document.getElementById('multiwordCanonical').value || 'cariës';
+            const phrase = document.getElementById('multiwordPhrase').value || 'tandbederf vlekjes';
+            const category = document.getElementById('multiwordCategory').value || document.getElementById('multiwordCategorySelect').value || 'oral_findings';
+            
+            await makeRequest('/api/lexicon/add-multiword-variant', 'POST', 'Add Multi-Word Variant', {
+                canonical_term: canonical,
+                variant_phrase: phrase,
+                category: category
+            });
+        }
+
+        async function removeMultiwordVariant() {
+            const canonical = document.getElementById('multiwordCanonical').value || 'cariës';
+            const phrase = document.getElementById('multiwordPhrase').value || 'tandbederf vlekjes';
+            const category = document.getElementById('multiwordCategory').value || document.getElementById('multiwordCategorySelect').value || 'oral_findings';
+            
+            await makeRequest('/api/lexicon/remove-multiword-variant', 'DELETE', 'Remove Multi-Word Variant', {
+                canonical_term: canonical,
+                variant_phrase: phrase,
+                category: category
+            });
+        }
+
         // Protected Words Functions
         async function addProtectedWord() {
             const word = document.getElementById('protectedWord').value || 'element';
@@ -1178,6 +1452,36 @@ Note: This tests the UNIFIED server (port 8089) with all migrated functionality.
                 }
             } catch (error) {
                 log(`❌ ${description} error: ${error.message}`, true);
+            }
+        }
+
+        // Helper functions for Smart Variant Management
+        async function makeAPICall(endpoint, method = 'GET', body = null) {
+            const options = {
+                method,
+                headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+            };
+
+            if (body && method !== 'GET') {
+                options.headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(`${BASE_URL}${endpoint}`, options);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || `HTTP ${response.status}`);
+            }
+
+            return data;
+        }
+
+        function showResult(message, isSuccess = true) {
+            if (isSuccess) {
+                log(`✅ ${message}`);
+            } else {
+                log(`❌ ${message}`, true);
             }
         }
     </script>

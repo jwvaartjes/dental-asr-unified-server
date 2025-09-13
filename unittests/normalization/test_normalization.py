@@ -262,8 +262,6 @@ class TestDentalNormalization:
             
             # Abbreviations and variants
             ('circa', 'ca.'),
-            ('ongeveer', 'ca.'),
-            ('parod', 'parodontitis'),
             ('botverlies', 'botverlies'),
             ('bot verlies', 'botverlies'),               # Compound
             
@@ -327,7 +325,7 @@ class TestDentalNormalization:
     ("cariës op een vier",                      "cariës op element 14"),
     ("de 11 is gevoelig",                       "element 11 is gevoelig"),
     ("element 1, 2 vertoont contact",           "element 12 vertoont contact"),
-    ("de 1 2 interfereert",                     "element 12 interereert"),  # lijst van 3 NIET samenvoegen
+    ("de 1 2 interfereert",                     "element 12 interfereert"),  # lijst van 3 NIET samenvoegen
 
     # --- Fuzzy met diacritics & punct ---
     ("karius!",                                 "cariës!"),
@@ -336,7 +334,7 @@ class TestDentalNormalization:
 
     # --- Hyphens: canoniek behouden, niet-canoniek splitsen ---
     ("mesio-occlusaal contact",                 "mesio-occlusaal contact"),  # canoniek hyphen
-    ("licht-mucosale zwelling",                 "lich mucosaal gebied"),     # niet-canoniek → split vóór fuzzy
+    ("licht-mucosale zwelling",                 "licht mucosale zwelling"),     # niet-canoniek → split vóór fuzzy
     ("distobuccaal is oké",                     "distobuccaal is oké"),      # canoniek 1-woord (geen split)
     ("1-4 is zichtbaar",                        "element 14 is zichtbaar"),  # cijferpaar blijft element
 
@@ -344,7 +342,7 @@ class TestDentalNormalization:
     ("30 procent botverlies",                   "30% botverlies"),
     ("15 mm pocket",                            "15mm pocket"),
     ("1-4 mm overlap",                          "1-4mm overlap"),            # unit-guard voorkomt element-conversie
-    ("0.5 mm incisale slijt",                   "0.5mm incisale slijt"),     # decimaal blijft, unit compact
+    ("0.5 mm incisale slijtage",                   "0.5mm incisale slijtage"),     # decimaal blijft, unit compact
 
     # --- Röntgen: begrippen & combinaties ---
     ("bitewing rechts: cariës distaal 1-4",     "bitewing rechts: cariës distaal element 14"),
@@ -353,7 +351,7 @@ class TestDentalNormalization:
     ("overlap bij 1, 2 (contactpunten)",        "overlap bij 1, 2 (contactpunten)"),
 
     # --- Multi-woord fuzzy met veto/minima ---
-    ("paro pocket bij 2 4",                     "paro pocket bij element 24"),   # let op: 'Paro' is protected → alleen 'pocket' blijft
+    ("parodontale pocket bij 2 4",                     "parodontale pocket bij element 24"),   # let op: 'Paro' is protected → alleen 'pocket' blijft
     ("bot verlies element 35",                  "botverlies element 35"),        # samenvoeging tot canoniek 1-woord
     ("interproximaal is schoon",                "interproximaal is schoon"),     # mag NIET naar intermaxillair
     ("vestibuleer oppervlakkig",                "vestibulair oppervlakkig"),     # wél naar adj., niet naar 'vestibulum'

@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, status, Request, Query, Depends
 
-from .schemas import LexiconTermRequest, LexiconCategoryRequest, ProtectedWordsRequest
+from .schemas import LexiconTermRequest, LexiconCategoryRequest, ProtectedWordsRequest, VariantRequest, MultiWordVariantRequest, AutoVariantRequest, AutoMultiWordVariantRequest, CanonicalTermInfoRequest
 from ..data.registry import DataRegistry
 
 logger = logging.getLogger(__name__)
@@ -430,3 +430,409 @@ async def delete_protect_word(
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting protected word: {str(e)}")
+
+
+# Variant Management Endpoints
+@router.post("/lexicon/add-variant")
+async def add_variant(
+    request: VariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Add a variant/abbreviation to a canonical term."""
+    canonical_term = request.canonical_term
+    variant = request.variant
+    category = request.category
+    
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Check if category exists
+        if category not in lexicon:
+            return {"success": False, "message": f"Category '{category}' not found"}
+        
+        # Check if canonical term exists in the category
+        if canonical_term not in lexicon[category]:
+            return {"success": False, "message": f"Canonical term '{canonical_term}' not found in category '{category}'"}
+        
+        # Ensure abbreviation category exists
+        abbr_category = f"{category}_abbr"
+        if abbr_category not in lexicon:
+            lexicon[abbr_category] = {}
+        
+        # Add the variant mapping
+        if isinstance(lexicon[abbr_category], dict):
+            lexicon[abbr_category][variant] = canonical_term
+        else:
+            # Convert to dict if it's not already
+            lexicon[abbr_category] = {variant: canonical_term}
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {"success": True, "message": f"Added variant '{variant}' → '{canonical_term}' in category '{category}'"}
+    
+    except Exception as e:
+        logger.error(f"Error adding variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lexicon/remove-variant")
+async def remove_variant(
+    request: VariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Remove a variant/abbreviation from a canonical term."""
+    canonical_term = request.canonical_term
+    variant = request.variant
+    category = request.category
+    
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Check abbreviation category
+        abbr_category = f"{category}_abbr"
+        if abbr_category not in lexicon:
+            return {"success": False, "message": f"No variants found for category '{category}'"}
+        
+        # Check if variant exists and maps to the canonical term
+        if variant not in lexicon[abbr_category]:
+            return {"success": False, "message": f"Variant '{variant}' not found"}
+        
+        if lexicon[abbr_category][variant] != canonical_term:
+            return {"success": False, "message": f"Variant '{variant}' maps to '{lexicon[abbr_category][variant]}', not '{canonical_term}'"}
+        
+        # Remove the variant
+        del lexicon[abbr_category][variant]
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {"success": True, "message": f"Removed variant '{variant}' from '{canonical_term}' in category '{category}'"}
+    
+    except Exception as e:
+        logger.error(f"Error removing variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lexicon/add-multiword-variant")
+async def add_multiword_variant(
+    request: MultiWordVariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Add a multi-word variant phrase to a canonical term."""
+    canonical_term = request.canonical_term
+    variant_phrase = request.variant_phrase
+    category = request.category
+    
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Check if category exists
+        if category not in lexicon:
+            return {"success": False, "message": f"Category '{category}' not found"}
+        
+        # Check if canonical term exists in the category
+        if canonical_term not in lexicon[category]:
+            return {"success": False, "message": f"Canonical term '{canonical_term}' not found in category '{category}'"}
+        
+        # Ensure abbreviation category exists
+        abbr_category = f"{category}_abbr"
+        if abbr_category not in lexicon:
+            lexicon[abbr_category] = {}
+        
+        # Add the multi-word variant mapping
+        if isinstance(lexicon[abbr_category], dict):
+            lexicon[abbr_category][variant_phrase] = canonical_term
+        else:
+            # Convert to dict if it's not already
+            lexicon[abbr_category] = {variant_phrase: canonical_term}
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {"success": True, "message": f"Added multi-word variant '{variant_phrase}' → '{canonical_term}' in category '{category}'"}
+    
+    except Exception as e:
+        logger.error(f"Error adding multi-word variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lexicon/remove-multiword-variant")
+async def remove_multiword_variant(
+    request: MultiWordVariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Remove a multi-word variant phrase from a canonical term."""
+    canonical_term = request.canonical_term
+    variant_phrase = request.variant_phrase
+    category = request.category
+    
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Check abbreviation category
+        abbr_category = f"{category}_abbr"
+        if abbr_category not in lexicon:
+            return {"success": False, "message": f"No variants found for category '{category}'"}
+        
+        # Check if variant phrase exists and maps to the canonical term
+        if variant_phrase not in lexicon[abbr_category]:
+            return {"success": False, "message": f"Multi-word variant '{variant_phrase}' not found"}
+        
+        if lexicon[abbr_category][variant_phrase] != canonical_term:
+            return {"success": False, "message": f"Multi-word variant '{variant_phrase}' maps to '{lexicon[abbr_category][variant_phrase]}', not '{canonical_term}'"}
+        
+        # Remove the variant phrase
+        del lexicon[abbr_category][variant_phrase]
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {"success": True, "message": f"Removed multi-word variant '{variant_phrase}' from '{canonical_term}' in category '{category}'"}
+    
+    except Exception as e:
+        logger.error(f"Error removing multi-word variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lexicon/variants/{category}")
+async def get_category_variants(
+    category: str,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Get all variants/abbreviations for a specific category."""
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Check abbreviation category
+        abbr_category = f"{category}_abbr"
+        if abbr_category not in lexicon:
+            return {"category": category, "variants": {}, "count": 0}
+        
+        variants = lexicon[abbr_category] if isinstance(lexicon[abbr_category], dict) else {}
+        return {"category": category, "variants": variants, "count": len(variants)}
+    
+    except Exception as e:
+        logger.error(f"Error getting variants for category {category}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Auto-detection Endpoints (Smart Variant Management)
+@router.post("/lexicon/find-canonical")
+async def find_canonical_term(
+    request: CanonicalTermInfoRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Find which category a canonical term belongs to."""
+    canonical_term = request.canonical_term
+    
+    try:
+        # Load current lexicon from Supabase
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        # Search for the canonical term across all categories
+        found_category = None
+        for category, terms in lexicon.items():
+            # Skip abbreviation categories
+            if category.endswith('_abbr') or category.startswith('element'):
+                continue
+            
+            if isinstance(terms, list):
+                # Check for exact match (case-insensitive)
+                for term in terms:
+                    if term.lower() == canonical_term.lower():
+                        found_category = category
+                        break
+            
+            if found_category:
+                break
+        
+        if found_category:
+            # Also get existing variants for this term
+            abbr_category = f"{found_category}_abbr"
+            variants = {}
+            if abbr_category in lexicon and isinstance(lexicon[abbr_category], dict):
+                # Find variants that map to this canonical term
+                for variant, mapped_term in lexicon[abbr_category].items():
+                    if mapped_term.lower() == canonical_term.lower():
+                        variants[variant] = mapped_term
+            
+            return {
+                "success": True, 
+                "canonical_term": canonical_term,
+                "category": found_category,
+                "existing_variants": variants,
+                "variant_count": len(variants)
+            }
+        else:
+            return {
+                "success": False, 
+                "message": f"Canonical term '{canonical_term}' not found in any category"
+            }
+    
+    except Exception as e:
+        logger.error(f"Error finding canonical term: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lexicon/add-variant-auto")
+async def add_variant_auto(
+    request: AutoVariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Add a variant with automatic category detection."""
+    canonical_term = request.canonical_term
+    variant = request.variant
+    
+    try:
+        # First find the category of the canonical term
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        found_category = None
+        for category, terms in lexicon.items():
+            # Skip abbreviation categories
+            if category.endswith('_abbr') or category.startswith('element'):
+                continue
+            
+            if isinstance(terms, list):
+                # Check for exact match (case-insensitive)
+                for term in terms:
+                    if term.lower() == canonical_term.lower():
+                        found_category = category
+                        canonical_term = term  # Use the exact case from lexicon
+                        break
+            
+            if found_category:
+                break
+        
+        if not found_category:
+            return {"success": False, "message": f"Canonical term '{canonical_term}' not found in any category"}
+        
+        # Ensure abbreviation category exists
+        abbr_category = f"{found_category}_abbr"
+        if abbr_category not in lexicon:
+            lexicon[abbr_category] = {}
+        
+        # Check if variant already exists
+        if isinstance(lexicon[abbr_category], dict) and variant in lexicon[abbr_category]:
+            existing_mapping = lexicon[abbr_category][variant]
+            if existing_mapping.lower() == canonical_term.lower():
+                return {"success": False, "message": f"Variant '{variant}' already maps to '{existing_mapping}'"}
+            else:
+                return {"success": False, "message": f"Variant '{variant}' already exists and maps to '{existing_mapping}'"}
+        
+        # Add the variant mapping
+        if isinstance(lexicon[abbr_category], dict):
+            lexicon[abbr_category][variant] = canonical_term
+        else:
+            # Convert to dict if it's not already
+            lexicon[abbr_category] = {variant: canonical_term}
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {
+            "success": True, 
+            "message": f"Added variant '{variant}' → '{canonical_term}' in category '{found_category}'",
+            "category": found_category,
+            "canonical_term": canonical_term,
+            "variant": variant
+        }
+    
+    except Exception as e:
+        logger.error(f"Error adding auto variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/lexicon/add-multiword-variant-auto")
+async def add_multiword_variant_auto(
+    request: AutoMultiWordVariantRequest,
+    admin_user_id: str = Depends(get_admin_user_id),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Add a multi-word variant with automatic category detection."""
+    canonical_term = request.canonical_term
+    variant_phrase = request.variant_phrase
+    
+    try:
+        # First find the category of the canonical term
+        lexicon = await data_registry.get_lexicon(admin_user_id)
+        
+        found_category = None
+        for category, terms in lexicon.items():
+            # Skip abbreviation categories
+            if category.endswith('_abbr') or category.startswith('element'):
+                continue
+            
+            if isinstance(terms, list):
+                # Check for exact match (case-insensitive)
+                for term in terms:
+                    if term.lower() == canonical_term.lower():
+                        found_category = category
+                        canonical_term = term  # Use the exact case from lexicon
+                        break
+            
+            if found_category:
+                break
+        
+        if not found_category:
+            return {"success": False, "message": f"Canonical term '{canonical_term}' not found in any category"}
+        
+        # Ensure abbreviation category exists
+        abbr_category = f"{found_category}_abbr"
+        if abbr_category not in lexicon:
+            lexicon[abbr_category] = {}
+        
+        # Check if variant phrase already exists
+        if isinstance(lexicon[abbr_category], dict) and variant_phrase in lexicon[abbr_category]:
+            existing_mapping = lexicon[abbr_category][variant_phrase]
+            if existing_mapping.lower() == canonical_term.lower():
+                return {"success": False, "message": f"Multi-word variant '{variant_phrase}' already maps to '{existing_mapping}'"}
+            else:
+                return {"success": False, "message": f"Multi-word variant '{variant_phrase}' already exists and maps to '{existing_mapping}'"}
+        
+        # Add the multi-word variant mapping
+        if isinstance(lexicon[abbr_category], dict):
+            lexicon[abbr_category][variant_phrase] = canonical_term
+        else:
+            # Convert to dict if it's not already
+            lexicon[abbr_category] = {variant_phrase: canonical_term}
+        
+        # Save updated lexicon to Supabase
+        success = await data_registry.save_lexicon(admin_user_id, lexicon)
+        if not success:
+            raise Exception("Failed to save lexicon to Supabase")
+        
+        return {
+            "success": True, 
+            "message": f"Added multi-word variant '{variant_phrase}' → '{canonical_term}' in category '{found_category}'",
+            "category": found_category,
+            "canonical_term": canonical_term,
+            "variant_phrase": variant_phrase
+        }
+    
+    except Exception as e:
+        logger.error(f"Error adding auto multi-word variant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

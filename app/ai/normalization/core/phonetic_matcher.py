@@ -585,6 +585,11 @@ class DutchPhoneticMatcher:
                 modified_tokens.append(token)
                 continue
                 
+            # Skip fuzzy matching for very short tokens (≤2 chars) to prevent unwanted transformations
+            if len(clean_token) <= 2:
+                modified_tokens.append(token)
+                continue
+                
             # Try to find a match using existing match method
             match_result = self.match(clean_token, canonicals)
             

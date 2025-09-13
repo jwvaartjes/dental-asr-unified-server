@@ -468,48 +468,109 @@ Binnen deze context worden telwoorden en getallen gecombineerd tot **elementnumm
 
 ---
 
-## Stap-voor-stap (pipeline)
+#Normalisatie-pipeline (herschreven + up-to-date)
 
-0) **Protected wrap**  
-   Markeer protected words; alle stappen werken alleen op onbeschermde segmenten.
+Deze pipeline zet ruwe transcriptietekst om naar een canonieke medische/dentale vorm. Ze is deterministisch, fail-fast bij onvolledige configuratie, en reproduceert alle “slimmigheden” van het oude systeem.
 
-1) **Preprocessing**  
-   - NBSP → spatie.  
-   - Scheid separators tussen cijfers (`, ; - /`), zodat `14;15` goed parsebaar wordt.  
-   *(Geen lowercasing of inhoudelijke wijzigingen.)*
+Volgorde (stap-voor-stap)
 
-2) **Element parsing (context & multi-woord)**  
-   - Herkent **paren 1..4 + 1..8** in algemene tekst → `element NN`.  
-   - **Context-regels (oude slimmigheden):**  
-     - `element 1, 2` → `element 12`  
-     - `de 11` / `de element 1-4` → `element 11` / `element 14`  
-     - `<context> een vier` → `<context> 14` (bv. `tand een vier` → `tand 14`)  
-     - `<context> 1 4` / `<context> 1-4` → `<context> 14`  
-   - Guard tegen dubbel prefix: bestaand `element 14` blijft `element 14` (nooit `element element 14`).
+Protected wrap
 
-3) **Learnable normalization (Supabase)**  
-   Regex-regels per praktijk/gebruiker (kan multi-woord zijn).
+Laadt protected words (uit Supabase).
 
-4) **Variant generation (vóór fuzzy)**  
-   - Spellingvarianten/afkortingen → canoniek.  
-   - **Cijferwoorden (contextgevoelig):**  
-     - `één` → altijd `1`  
-     - `een` → **alleen** numeriek in relevante context (bv. na contextwoord of tussen element-separators).  
-     - Aanbevolen: laat `"een": "1"` **weg** uit Supabase; `"één": "1"` wel opnemen.
+Wrapt altijd met sentinels op woordgrenzen (zonder lookahead): zo blijven woorden als op, Paro onaangetast (ook midden in de zin).
 
-5) **Phonetic/fuzzy matching**  
-   - Levenshtein per woordtoken tegen canonieke termen.  
-   - **Slaat cijfers/percentages over**.  
-   - Kan multi-woord samenstellingen corrigeren (bv. `bot verlies` → `botverlies`).
+Protected segmenten worden in alle volgende stappen overgeslagen.
 
-6) **Postprocessing**  
-   - Spaties en interpunctie opschonen.  
-   - **Dedup** oude-stijl: `element 14 element 14` → `element 14`.  
-   - **Lidwoord-cleanup**: `" de element "` → `" element "`; `"de element …"` aan zinbegin → `"element …"`.
+0.5 Unicode normalisatie
 
-7) **Protected unwrap**  
-   Verwijder markers; protected words blijven exact zoals ingevoerd.
+Zet input naar NFC (diacritics stabiel: cariüs → cariës).
 
+Preprocessing
+
+Spacefix rond separators voor cijfers (bv. in 1-4), NBSP → spatie, trimmen.
+
+Element parsing (robuust)
+
+Herkent cijferparen 1-4, 1 4, 1,4 → element 14.
+
+Negative lookbehind voorkomt dubbel prefix: element 14 blijft element 14.
+
+Comma-list guard: sequenties als 1, 2, 3 blijven ongemoeid (geen “element 12, 3”).
+
+“de 11”-regel: de 11 → element 11.
+
+Telwoord-paren ook buiten context: twee vier / een vier → element 24 / element 14.
+
+Unit-guard: géén element-conversie als er direct een unit volgt: 15 mm blijft meetwaarde (gaat later naar 15mm).
+
+Learnable / Custom patterns
+
+Regels uit Supabase (regex/patterns).
+
+Matching gebeurt accent-agnostisch; vervangen met canonieke vorm; punctuatie wordt bewaard.
+
+Variant generation (uitgebreid)
+
+Eén- en multi-woord varianten met flexibele gaps (spatie of -, meerdere spaties) en punctuatie-preserve.
+
+Voorbeeld: bot verlies, bot-verlies, bot verlies, → botverlies,
+
+Telwoord→cijfer mapping (bv. één → 1; let op: een alleen contextueel indien geconfigureerd).
+
+Doel: vóór fuzzy al zoveel mogelijk naar canoniek.
+
+4.5 Hyphen-prepass (vóór phonetic)
+
+Niet-canonieke woord-woord hyphens worden gesplitst naar spatie → triggert multi-woord veto in fuzzy.
+
+Canonieke hyphen-termen (uit lexicon/variants/pattern-dst) blijven intact.
+
+Numerieke ranges (1-4) blijven ongemoeid.
+
+Phonetic/Fuzzy normalize (multi-woord, veto, minima)
+
+Verplicht de geavanceerde DutchPhoneticMatcher.normalize(...) (geen fallback).
+
+Kandidaat-set = alleen echte canonicals (keys uit lexicon); géén dict.values() of pattern-dst in canonicals.
+
+Multi-woord scoring met safeguards:
+
+Per-woord veto: als één woordscore < 0.60 ⇒ hele match afwijzen.
+
+Gemiddelde minima: bigrams ≥ 0.70; ≥3 woorden ≥ 0.75.
+
+require_all_words = true (conservatief aligneren).
+
+Phonetic boost = tie-breaker, geen katapult:
+
+Alleen voor top-1 (of near-top) op base-score.
+
+Gated met floor (≥ 0.60), minimale lengte (≥ 5), en core-check (generieke prefixen zoals inter-/mesio-/disto- tellen niet mee).
+
+Morfologie-guard: promoot géén verb/adj. (-eer/-air/-aal/...) naar Latijns znw. (-um/-us/...).
+
+Gated Soundex: alleen mengen wanneer base al ≥ floor.
+
+Uitvoer is canoniek mét diacritics; numerieke tokens en protected blijven ongemoeid.
+
+5.5 Diacritics-restore (defensie)
+
+Token-wise map {fold(canoniek) → canoniek} zet per ongeluk accentloze hits terug naar bv. cariës.
+
+Postprocessing
+
+Spaties/punctuatie opschonen.
+
+Unit-compact: 30 % → 30%, 15 mm → 15mm (symbolisch en alfabetisch afzonderlijk afgehandeld).
+
+Dedupes: element element → element, element 14 element 14 → element 14.
+
+de element → element.
+
+Protected unwrap
+
+Sentinels verwijderen; protected tekst staat exact zoals ingevoerd.
 ---
 
 ## Voorbeelden (verwachte output)
