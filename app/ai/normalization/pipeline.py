@@ -35,16 +35,16 @@ _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?%?$")
 _UNIT_AFTER_RE = re.compile(r'^\\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)\\b', re.IGNORECASE)
 # 1) Algemeen paar 1..4 + 1..8, maar niet als er al 'element ' vóór staat
 _ELEMENT_SIMPLE_RE = re.compile(
-    r"(?<!\belement\s)\b([1-4])\s*(?:-\s*|,\s+|\s+)?([1-8])\b(?!\s*,\s*[1-8]\b)",
+    r"(?<!\belement\s)\b([1-8])\s*(?:-\s*|,\s+|\s+)?([1-8])\b(?!\s*,\s*[1-8]\b)",
     re.IGNORECASE
 )
-_ELEMENT_LIST_FIX_RE = re.compile(r"\belement\s+([1-4])\s*[, ]\s*([1-8])\b", re.IGNORECASE)
+_ELEMENT_LIST_FIX_RE = re.compile(r"\belement\s+([1-8])\s*[, ]\s*([1-8])\b", re.IGNORECASE)
 # 2) Binnen element-context: 'element 1 4' / 'element 1-4' / 'element 14'
-_ELEMENT_WITH_PREFIX_RE = re.compile(r"\belement\s+([1-4])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
+_ELEMENT_WITH_PREFIX_RE = re.compile(r"\belement\s+([1-8])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
 # 3) Dental context with prefix patterns: 'tand 1 4' / 'kies 1-4' → 'tand 14'
-_DENTAL_WITH_PREFIX_RE = re.compile(r"\b(tand|kies|molaar|premolaar)\s+([1-4])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
+_DENTAL_WITH_PREFIX_RE = re.compile(r"\b(tand|kies|molaar|premolaar)\s+([1-8])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
 # 4) 'de 11' / 'de element 1-1' → 'element 11'  
-_DE_ELEMENT_RE = re.compile(r"\bde\s+(?:element\s+)?([1-4])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
+_DE_ELEMENT_RE = re.compile(r"\bde\s+(?:element\s+)?([1-8])\s*[, \-]?\s*([1-8])\b", re.IGNORECASE)
 # 5) General patterns (element parsing only for now) 
 # Note: Complex negative lookbehind removed due to variable width limitations
 
@@ -191,7 +191,12 @@ class DefaultTokenizer:
 class DefaultElementParser:
     def __init__(self, valid_elements: Iterable[str] | None = None):
         if valid_elements is None:
+            # Permanent teeth: 11-18, 21-28, 31-38, 41-48
             valid_elements = [f"{a}{b}" for a in range(1, 5) for b in range(1, 9)]
+            # Add primary teeth: 51-55, 61-65, 71-75, 81-85
+            for quadrant in [5, 6, 7, 8]:
+                for tooth in range(1, 6):
+                    valid_elements.append(f"{quadrant}{tooth}")
         self.valid = set(valid_elements)
         self.word2digit = {
             "één": "1", "een": "1",
@@ -201,7 +206,16 @@ class DefaultElementParser:
 
     def parse(self, text: str) -> str:
         # 0) 'element 1, 2' → 'element 12' (list-fix) — lambda i.p.v. backrefs
-        text = _ELEMENT_LIST_FIX_RE.sub(lambda m: f"element {m.group(1)}{m.group(2)}", text)
+        # BUT only if the result is a valid tooth number
+        def _element_list_with_validation(m: re.Match) -> str:
+            combined = f"{m.group(1)}{m.group(2)}"
+            # Only combine if the result is a valid tooth number
+            if combined in self.valid:
+                return f"element {combined}"
+            else:
+                # Keep original with space if not valid
+                return m.group(0)
+        text = _ELEMENT_LIST_FIX_RE.sub(_element_list_with_validation, text)
 
         # 1) 'de 11' / 'de element 1-1' → 'element 11'
         text = _DE_ELEMENT_RE.sub(lambda m: f"element {m.group(1)}{m.group(2)}", text)
@@ -216,10 +230,29 @@ class DefaultElementParser:
                       _dental_words_to_digits, text, flags=re.IGNORECASE)
 
         # 3) Binnen element-context paren samenvoegen: 'element 1 4' / 'element 1-4' → 'element 14'
-        text = _ELEMENT_WITH_PREFIX_RE.sub(lambda m: f"element {m.group(1)}{m.group(2)}", text)
+        # BUT only if the result is a valid tooth number
+        def _element_with_validation(m: re.Match) -> str:
+            combined = f"{m.group(1)}{m.group(2)}"
+            # Only combine if the result is a valid tooth number
+            if combined in self.valid:
+                return f"element {combined}"
+            else:
+                # Keep original with space if not valid
+                return m.group(0)
+        text = _ELEMENT_WITH_PREFIX_RE.sub(_element_with_validation, text)
 
         # 4) Binnen dental-context paren samenvoegen: 'tand 1 4' / 'kies 1-4' → 'tand 14' 
-        text = _DENTAL_WITH_PREFIX_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}{m.group(3)}", text)
+        # BUT only if the result is a valid tooth number
+        def _dental_with_validation(m: re.Match) -> str:
+            prefix, d1, d2 = m.group(1), m.group(2), m.group(3)
+            combined = f"{d1}{d2}"
+            # Only combine if the result is a valid tooth number
+            if combined in self.valid:
+                return f"{prefix} {combined}"
+            else:
+                # Keep original with space if not valid
+                return m.group(0)
+        text = _DENTAL_WITH_PREFIX_RE.sub(_dental_with_validation, text)
 
         # 5) First protect units by temporarily replacing them
         # This prevents patterns like "12 %" from being parsed as element patterns
