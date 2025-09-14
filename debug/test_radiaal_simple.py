@@ -1,92 +1,58 @@
 #!/usr/bin/env python3
 """
-Simple test to investigate why 'radiaal' is matching to 'radiopaak'
-This test uses only the actual codebase without external dependencies
+Simple debug to see why radiaal matches to radiopaak
 """
 
 import sys
 import os
+# Add parent dir to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Now let's trace through what happens with 'radiaal' in the actual normalization pipeline
-def test_radiaal():
-    print("🔍 Investigating why 'radiaal' → 'radiopaak'\n")
-    print("=" * 60)
-    
-    # Test the actual normalization through the learnable normalizer
-    try:
-        # Import the actual learnable normalizer
-        sys.path.insert(0, '/Users/janwillemvaartjes/tand-asr-runpod/stable_baseline_workspace')
-        from learnable_normalizer import DentalNormalizer
-        
-        # Initialize normalizer (loads from Supabase)
-        normalizer = DentalNormalizer()
-        
-        # Test the problematic word
-        test_word = "radiaal"
-        
-        print(f"Testing word: '{test_word}'")
-        print("-" * 40)
-        
-        # Run the normalization
-        result = normalizer.normalize(test_word)
-        
-        print(f"\nNormalization result:")
-        print(f"  Input:      '{test_word}'")
-        print(f"  Normalized: '{result.normalized_text}'")
-        
-        if hasattr(result, 'debug') and result.debug:
-            print(f"\nDebug information:")
-            for step, value in result.debug.items():
-                if value != test_word and value != result.normalized_text:
-                    print(f"  {step}: '{value}'")
-        
-        # Also test the phonetic matching directly if we can
-        print("\n" + "=" * 60)
-        print("Testing phonetic matching mechanism:")
-        
-        # Check what's in the lexicon for radio-related terms
-        if hasattr(normalizer, 'lexicon') and normalizer.lexicon:
-            print("\nRadio-related terms in lexicon:")
-            for key in sorted(normalizer.lexicon.keys()):
-                if 'radi' in key.lower():
-                    values = normalizer.lexicon[key]
-                    if isinstance(values, list):
-                        print(f"  {key}: {', '.join(values)}")
-                    else:
-                        print(f"  {key}: {values}")
-        
-        # Try to understand the matching score
-        print("\n" + "=" * 60)
-        print("Analysis of the matching issue:\n")
-        
-        print("1. Character overlap analysis:")
-        print(f"   'radiaal' vs 'radiopaak'")
-        print(f"   Common prefix: 'radi' (4 chars)")
-        print(f"   Lengths: radiaal=7, radiopaak=9")
-        print(f"   Basic similarity: ~4/8 = 50%")
-        
-        print("\n2. Phonetic similarity:")
-        print(f"   Both start with 'radi' sound")
-        print(f"   'aal' ending (adjective) vs 'aak' ending")
-        print(f"   Phonetically similar but different word types")
-        
-        print("\n3. Morphological analysis:")
-        print(f"   'radiaal' ends with '-aal' (typical adjective ending)")
-        print(f"   'radiopaak' has no clear morphological family")
-        print(f"   These should NOT be matched together!")
-        
-        print("\n4. Expected behavior:")
-        print(f"   'radiaal' should remain 'radiaal' (or map to a dental term)")
-        print(f"   NOT be changed to 'radiopaak' (radiopaque)")
-        
-        return result
-        
-    except Exception as e:
-        print(f"Error during testing: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+from app.ai.normalization.core.phonetic_matcher import DutchPhoneticMatcher
 
-if __name__ == "__main__":
-    test_radiaal()
+# Create matcher
+pm = DutchPhoneticMatcher()
+
+# Test direct fuzzy scores
+test_word = "radiaal"
+candidates = ["radiaal", "radiopaak", "radiale", "radiopaque", "radioactief"]
+
+print(f"Testing '{test_word}' against candidates:")
+print("-" * 60)
+
+for candidate in candidates:
+    # Get base fuzzy score using phonetic matcher's fuzzy_match method
+    base_score = pm.fuzzy_match(test_word, candidate)
+    
+    # Check if phonetic match
+    input_phonetics = set(pm.to_phonetic(test_word))
+    candidate_phonetics = set(pm.to_phonetic(candidate))
+    phonetic_match = bool(input_phonetics & candidate_phonetics)
+    
+    # Check morphological compatibility
+    families_compatible = pm._families_compatible(test_word, candidate)
+    
+    print(f"\n'{test_word}' vs '{candidate}':")
+    print(f"  Base fuzzy score: {base_score:.4f}")
+    print(f"  Phonetic match: {phonetic_match}")
+    print(f"  Phonetics: {input_phonetics} vs {candidate_phonetics}")
+    print(f"  Families compatible: {families_compatible}")
+    
+    # Would it get boosted?
+    if base_score >= 0.70 and len(test_word) >= 5 and len(candidate) >= 5:
+        if phonetic_match and families_compatible:
+            print(f"  -> Would get phonetic boost from {base_score:.4f} to 0.95")
+        elif phonetic_match and not families_compatible:
+            print(f"  -> Phonetic boost blocked by family incompatibility")
+    
+    # Soundex
+    soundex_input = pm._dutch_soundex(test_word)
+    soundex_cand = pm._dutch_soundex(candidate)
+    soundex_score = pm.fuzzy_match(soundex_input, soundex_cand)
+    print(f"  Soundex: '{soundex_input}' vs '{soundex_cand}' = {soundex_score:.4f}")
+    
+    # Final score after boost
+    if base_score >= 0.70 and phonetic_match and families_compatible and len(test_word) >= 5:
+        final = max(base_score, 0.95)
+        final = (final + soundex_score * 0.3) / 1.3
+        print(f"  Final score after boost: {final:.4f}")

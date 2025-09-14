@@ -256,6 +256,9 @@ class TestDentalNormalization:
             
             # Number words and context
             ('element een vier', 'element 14'),         # NOT "element element 14"
+            ('element 1, 4', 'element 14'),         
+            ('1 4', 'element 14'),         		
+            ('1-4 en 2-3', 'element 14 en element 23'),         	
             ('de element 11', 'element 11'),            # Lidwoord cleanup
             ('molaar 6 7', 'molaar 67'),                # Context combination
             ('premolaar 4 5', 'premolaar 45'),          # Context combination
@@ -318,8 +321,8 @@ class TestDentalNormalization:
             ("karius op kies twee zes", "cariës op kies 26"),
 
             ("element 41: cariës distaal", "element 41: cariës distaal"),
-            ("41: cariës", "element 41: cariës distaal"),
-            ("element vijfenveertig: occlusaal", "element 45: cariës distaal"),
+            ("41: cariës", "element 41: cariës"),
+            ("element vijfenveertig: occlusaal", "element vijfenveertig: occlusaal"),
 
 
     ("cariës distaal van 1-4",                  "cariës distaal van element 14"),

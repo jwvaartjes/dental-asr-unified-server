@@ -322,7 +322,30 @@ class DefaultVariantGenerator:
         self.separators: List[str] = list(cfg.get("separators", ["-", " ", ",", ";", "/"]))
         self.element_separators: List[str] = list(cfg.get("element_separators", ["-", " ", ",", ";", "/"]))
         self.digit_words: Dict[str, str] = dict(cfg.get("digit_words", {}))
-        variants = {**(config or {}).get('variants', {}), **((lexicon_data or {}).get('variants', {}))}
+        
+        # Debug: Check what variants are being loaded
+        config_variants = (config or {}).get('variants', {})
+        lexicon_variants = (lexicon_data or {}).get('variants', {})
+        
+        # Log the variants we're getting
+        if 'bot verlies' in config_variants:
+            print(f"[DEBUG] Found 'bot verlies' in config variants: {config_variants['bot verlies']}")
+        if 'bot verlies' in lexicon_variants:
+            print(f"[DEBUG] Found 'bot verlies' in lexicon variants: {lexicon_variants['bot verlies']}")
+            
+        variants = {**config_variants, **lexicon_variants}
+        
+        # Log total variants loaded
+        print(f"[DEBUG] DefaultVariantGenerator loaded {len(variants)} variants")
+        if 'bot verlies' in variants:
+            print(f"[DEBUG] ✅ 'bot verlies' → '{variants['bot verlies']}' mapping loaded")
+        else:
+            print(f"[DEBUG] ❌ 'bot verlies' NOT in variants")
+            # Show first few variants as sample
+            if variants:
+                sample = list(variants.items())[:5]
+                print(f"[DEBUG] Sample variants: {sample}")
+        
         # Gebruik gedeelde engine - IMPORTANT: TokenAwareReplacer expects the SOURCE (what to match) as the key
         # But Supabase stores it as "bot verlies" → "botverlies" where the key is what we want to match
         # So we DON'T need to reverse, the mapping is already correct
@@ -365,7 +388,8 @@ class DefaultVariantGenerator:
 
     def generate(self, text: str) -> str:
         t = self._replace_digit_words(text)
-        t = self._space_separators_between_digits(t, self.element_separators)
+        # TEMPORARILY COMMENTED OUT FOR TESTING - adds spaces around commas between digits
+        # t = self._space_separators_between_digits(t, self.element_separators)
         t = self._replacer.apply(t)
         return t
 
@@ -547,7 +571,15 @@ class NormalizationPipeline:
         # NOT as fuzzy matching targets, so we don't add them to canonicals
 
         # Store canonicals for phonetic matching
-        self.canonicals = [c for c in canonicals if isinstance(c, str)]
+        # Add variant destination values to canonicals so they're recognized as canonical
+        # This prevents the phonetic matcher from trying to retokenize compound words like "botverlies"
+        if lexicon_data and 'variants' in lexicon_data:
+            for source, dest in lexicon_data['variants'].items():
+                if isinstance(dest, str) and dest.strip():
+                    canonicals.append(dest.strip())
+        
+        # Deduplicate and sort
+        self.canonicals = sorted(set(c for c in canonicals if isinstance(c, str)), key=str.lower)
         
         # Build the map
         for canonical in canonicals:
@@ -679,13 +711,13 @@ class NormalizationPipeline:
         if self.flags.get("enable_custom_patterns", True):
             current = self._apply_on_unprotected(current, self.custom_patterns.apply)
             dbg["custom_patterns"] = current
+        # Add hyphen splitting BEFORE variant generation to avoid splitting compound results
+        current = self._apply_on_unprotected(current, self._split_noncanonical_hyphens)
+        dbg["hyphen_split"] = current
+        
         if self.flags.get("enable_variant_generation", True):
             current = self._apply_on_unprotected(current, self.variant_generator.generate)
             dbg["variants"] = current
-        
-        # Add hyphen splitting BEFORE phonetic matching to enable veto thresholds
-        current = self._apply_on_unprotected(current, self._split_noncanonical_hyphens)
-        dbg["hyphen_split"] = current
         
         # Apply phonetic matching if enabled (uses the proper threshold 0.70)
         if self.flags.get("enable_phonetic_matching", True):

@@ -57,7 +57,8 @@ class DutchPhoneticMatcher:
     GENERIC_PREFIXES = (
         "inter", "intra", "infra", "supra", "sub", "peri", "para",
         "hyper", "hypo", "endo", "ecto", "meso", "meta", "ortho",
-        "mesio", "disto", "bucco", "linguo", "palato", "labio"
+        "mesio", "disto", "bucco", "linguo", "palato", "labio",
+        "radi"  # Add radi- prefix (radiaal, radix, radiografie)
     )
     
     def _detect_generic_prefix(self, word: str) -> tuple[str, str]:
