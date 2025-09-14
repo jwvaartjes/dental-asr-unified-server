@@ -314,7 +314,8 @@ class DutchPostProcessor:
                     DutchCorrection(old, new, 'spelling')
                 )
         return text
-    
+
+
     def _fix_punctuation(self, text: str) -> str:
         """Fix spacing around punctuation"""
         # Remove spaces before punctuation

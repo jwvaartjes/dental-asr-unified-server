@@ -119,10 +119,9 @@ class TokenAwareReplacer:
     def apply(self, text: str) -> str:
         out = text
         for rx, dst, preserve in self.compiled:
-            if preserve:
-                out = rx.sub(lambda m: f"{dst}{self._suffix_from_match(m)}", out)
-            else:
-                out = rx.sub(dst, out)
+            # Always use the exact canonical form (dst) as-is
+            # No need to append punctuation - the canonical form is already complete
+            out = rx.sub(dst, out)
         return out
 # --------------------------
 # Protected Words Guard
@@ -519,9 +518,24 @@ class DefaultPostProcessor:
         if self.config.get('remove_trailing_commas_eol', False):
             t = re.sub(r',\s*$', '', t)
         
-        # -- Optioneel: zinseinde-punten weg, maar laat decimalen ('0.5') staan --
+        # -- Optioneel: zinseinde-punten weg, maar laat decimalen ('0.5') en canonical abbreviaties staan --
         if self.config.get('remove_sentence_dots', False):
+            # Preserve canonical abbreviations that should keep their periods
+            canonical_abbrevs = r'\b(?:ca|etc|vs|i\.e|e\.g|bijv|bv|dhr|mw|dr|prof|ing|nl|eng|enz|resp|incl|excl|mm|cm|kg|gr|ml)\.'
+            # Temporarily replace canonical abbreviations with placeholders
+            placeholders = {}
+            import uuid
+            for match in re.finditer(canonical_abbrevs, t, re.IGNORECASE):
+                placeholder = f"__ABBREV_{uuid.uuid4().hex[:8]}__"
+                placeholders[placeholder] = match.group(0)
+                t = t.replace(match.group(0), placeholder, 1)
+
+            # Now remove sentence dots (but not decimals or our protected abbreviations)
             t = re.sub(r'(?<!\d)\.(?!\d)', '', t)
+
+            # Restore canonical abbreviations
+            for placeholder, original in placeholders.items():
+                t = t.replace(placeholder, original)
         
         # Keep existing trailing word comma removal for backwards compatibility
         if self.config.get('remove_trailing_dots', False):
@@ -543,6 +557,7 @@ class DefaultPostProcessor:
 # ==========================
 
 class NormalizationPipeline:
+    
     def __init__(self, lexicon_data: Optional[Dict[str, Any]] = None, config: Optional[Dict[str, Any]] = None, *, tokenizer: Optional[DefaultTokenizer] = None):
         self.config = config or {}
         self.lexicon = lexicon_data or {}
@@ -597,13 +612,26 @@ class NormalizationPipeline:
             canonicals = list(self.lexicon["lexicon"].keys())
         else:
             # Extract from category-based lexicon structure (pathologie, rx_findings, etc.)
+            # First pass: collect all main lexicon terms (not from _abbr categories)
+            main_lexicon_terms = set()
+
             for category_name, category_data in self.lexicon.items():
                 if isinstance(category_data, list):
-                    # Category contains a list of terms
+                    # Category contains a list of canonical terms
                     canonicals.extend(category_data)
-                elif isinstance(category_data, dict):
-                    # Category contains a dictionary of terms
+                    main_lexicon_terms.update(category_data)
+                elif isinstance(category_data, dict) and not category_name.endswith('_abbr'):
+                    # Non-abbreviation dictionary - keys are canonical terms
                     canonicals.extend(category_data.keys())
+                    main_lexicon_terms.update(category_data.keys())
+
+            # Second pass: for _abbr categories, only add keys that are already in main lexicon
+            for category_name, category_data in self.lexicon.items():
+                if isinstance(category_data, dict) and category_name.endswith('_abbr'):
+                    for key in category_data.keys():
+                        if key in main_lexicon_terms:
+                            # This key is a canonical form (exists in main lexicon)
+                            canonicals.append(key)
 
         # Custom patterns are handled as transformations before fuzzy matching
         # NOT as fuzzy matching targets, so we don't add them to canonicals
@@ -616,8 +644,9 @@ class NormalizationPipeline:
                 if isinstance(dest, str) and dest.strip():
                     canonicals.append(dest.strip())
         
+
         # Deduplicate and sort
-        self.canonicals = sorted(set(c for c in canonicals if isinstance(c, str)), key=str.lower)
+        self.canonicals = sorted(set(canonicals), key=str.lower)
         
         # Build the map
         for canonical in canonicals:
