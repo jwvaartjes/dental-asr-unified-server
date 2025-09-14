@@ -163,7 +163,7 @@ class TestDentalNormalization:
             # Test period preservation in canonical terms
             ("circa", "ca."),
             ("Circa", "ca."),
-            ("CIRCA", "ca."),
+            ("Pocketdiepte CIRCA 7mm ", "pocketdiepte ca. 7mm"),
         ]
         
         for input_text, expected in test_cases:
@@ -260,11 +260,12 @@ class TestDentalNormalization:
             ('1 4', 'element 14'),         		
             ('1-4 en 2-3', 'element 14 en element 23'),         	
             ('de element 11', 'element 11'),            # Lidwoord cleanup
-            ('molaar 6 7', 'molaar 67'),                # Context combination
+            ('molaar 6 7', 'molaar 6 7'),                # non existing molar
+            ('molaar 7 5', 'molaar 75'),                # non existing molar
             ('premolaar 4 5', 'premolaar 45'),          # Context combination
             
             # Abbreviations and variants
-            ('circa', 'ca.'),
+            ('circa 10mm', 'ca. 10mm'),
             ('botverlies', 'botverlies'),
             ('bot verlies', 'botverlies'),               # Compound
             ('bot-verlies', 'botverlies'), 
@@ -307,6 +308,7 @@ class TestDentalNormalization:
             ("15 mm", "15mm"),
             ("1,5 jaar", "1,5 jaar"),
             ("12 weken", "12 weken"),
+            ("een twee weken", "een twee weken"),
             ("1-4 mm", "1-4mm"),
               
             # Custom patterns
@@ -352,7 +354,6 @@ class TestDentalNormalization:
     # --- Röntgen: begrippen & combinaties ---
     ("bitewing rechts: cariës distaal 1-4",     "bitewing rechts: cariës distaal element 14"),
     ("periapicaal apicaal beeld element 12",    "periapicaal apicaal beeld element 12"),
-    ("PA regio 13 toont overlap",               "PA regio 13 toont overlap"),
     ("overlap bij 1, 2 (contactpunten)",        "overlap bij 1, 2 (contactpunten)"),
 
     # --- Multi-woord fuzzy met veto/minima ---

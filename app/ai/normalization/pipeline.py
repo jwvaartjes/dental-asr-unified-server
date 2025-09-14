@@ -35,7 +35,7 @@ _NUMERIC_RE = re.compile(r"^\d+(?:[.,]\d+)?%?$")
 _UNIT_AFTER_RE = re.compile(r'^\\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)\\b', re.IGNORECASE)
 # 1) Algemeen paar 1..4 + 1..8, maar niet als er al 'element ' vóór staat
 _ELEMENT_SIMPLE_RE = re.compile(
-    r"(?<!\belement\s)\b([1-8])\s*(?:-\s*|,\s+|\s+)?([1-8])\b(?!\s*,\s*[1-8]\b)",
+    r"(?<!\belement\s)\b([1-8])\s*(?:-\s*|,\s+|\s+)?([1-8])\b(?!\s*,\s*[1-8]\b)(?!\s*(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)\b)",
     re.IGNORECASE
 )
 _ELEMENT_LIST_FIX_RE = re.compile(r"\belement\s+([1-8])\s*[, ]\s*([1-8])\b", re.IGNORECASE)
@@ -205,6 +205,7 @@ class DefaultElementParser:
         }
 
     def parse(self, text: str) -> str:
+        
         # 0) 'element 1, 2' → 'element 12' (list-fix) — lambda i.p.v. backrefs
         # BUT only if the result is a valid tooth number
         def _element_list_with_validation(m: re.Match) -> str:
@@ -228,6 +229,23 @@ class DefaultElementParser:
             return f"{context} {da} {db}"
         text = re.sub(r"\b(element|tand|kies|molaar|premolaar)\s+([A-Za-zéÉ]+)\s+([A-Za-zéÉ]+)\b",
                       _dental_words_to_digits, text, flags=re.IGNORECASE)
+
+        # 2b) Standalone Dutch number word pairs outside dental context
+        # 'een vier' → 'element 14', 'twee drie' → 'element 23'
+        # BUT NOT when followed by time units
+        def _standalone_dutch_words_to_element(m: re.Match) -> str:
+            a, b = m.group(1), m.group(2)
+            da = self.word2digit.get(a.lower(), None)
+            db = self.word2digit.get(b.lower(), None)
+            if da and db:
+                combined = f"{da}{db}"
+                if combined in self.valid:
+                    return f"element {combined}"
+            return m.group(0)
+        
+        # Use negative lookahead to prevent conversion when followed by time units
+        text = re.sub(r'\b(één|een|twee|drie|vier|vijf|zes|zeven|acht)\s+(één|een|twee|drie|vier|vijf|zes|zeven|acht)\b(?!\s+(week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)\b)',
+                      _standalone_dutch_words_to_element, text, flags=re.IGNORECASE)
 
         # 3) Binnen element-context paren samenvoegen: 'element 1 4' / 'element 1-4' → 'element 14'
         # BUT only if the result is a valid tooth number
@@ -254,24 +272,7 @@ class DefaultElementParser:
                 return m.group(0)
         text = _DENTAL_WITH_PREFIX_RE.sub(_dental_with_validation, text)
 
-        # 5) First protect units by temporarily replacing them
-        # This prevents patterns like "12 %" from being parsed as element patterns
-        protected_text = text
-        unit_protection_map = {}
-        unit_counter = 0
-        
-        def protect_unit(match):
-            nonlocal unit_counter
-            placeholder = f"〔UNIT{unit_counter}〕"
-            unit_protection_map[placeholder] = match.group(0)
-            unit_counter += 1
-            return placeholder
-        
-        # Protect number-unit patterns (includes all units from _UNIT_AFTER_RE)
-        protected_text = re.sub(r'(\d+)\s+(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)(?=\s|$)', 
-                               protect_unit, protected_text, flags=re.IGNORECASE)
-        
-        # 6) Algemene paren (buiten context), maar check eerst of er al dental context is
+        # 5) Algemene paren (buiten context), maar check eerst of er al dental context is
         def _repl_simple(m: re.Match) -> str:
             # Check if this match is preceded by dental context words
             start_pos = m.start()
@@ -286,14 +287,13 @@ class DefaultElementParser:
             nn = f"{m.group(1)}{m.group(2)}"
             return f"element {nn}" if nn in self.valid else m.group(0)
         
-        # Apply element parsing on protected text
-        result = _ELEMENT_SIMPLE_RE.sub(_repl_simple, protected_text)
+        # Apply element parsing on the text
+        text = _ELEMENT_SIMPLE_RE.sub(_repl_simple, text)
         
-        # Restore protected units
-        for placeholder, original in unit_protection_map.items():
-            result = result.replace(placeholder, original)
+        # No need for placeholder restoration - we're using negative lookahead to prevent
+        # Dutch number words from being converted when followed by time units
             
-        return result
+        return text
 
 class DefaultLearnableNormalizer:
     def __init__(self, rules: Optional[List[Dict[str, Any]]] = None):
@@ -375,6 +375,11 @@ class DefaultVariantGenerator:
         self._replacer = TokenAwareReplacer(variants)
 
     def _replace_digit_words(self, text: str) -> str:
+        # Skip replacement if text contains unit protection placeholders
+        # This ensures that protected patterns like "een twee weken" remain unchanged
+        if '\uFFF0UNIT' in text:
+            return text
+            
         t = text
         # 1) Één met accent is eenduidig numeriek
         t = re.sub(r"\b[Éé]én\b", "1", t)
@@ -390,10 +395,20 @@ class DefaultVariantGenerator:
         t = re.sub(rf"(?i)\been\b\s*([{sep_class}])\s*(\b[1-9]\b)", r"1\1 \2", t)
 
         # 3) Overige digit_words (bewust zonder 'een'/'één' hier)
+        # BUT not if followed by time units
+        # ALSO protect if this word is followed by another Dutch number word + time unit
+        # (e.g., "twee drie dagen" should not convert "twee" to "2")
+        time_units = r"(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)"
+        dutch_numbers = r"(één|een|twee|drie|vier|vijf|zes|zeven|acht)"
+        
         for w, d in self.digit_words.items():
             if w.lower() in ("een", "één"):
                 continue
-            t = re.sub(rf"\b{re.escape(w)}\b", d, t, flags=re.IGNORECASE)
+            # Protect from conversion if:
+            # 1. Directly followed by time unit
+            # 2. Followed by another Dutch number word + time unit (e.g., "twee drie dagen")
+            pattern = rf"\b{re.escape(w)}\b(?!(\s*{time_units}\b|\s+{dutch_numbers}\s+{time_units}\b))"
+            t = re.sub(pattern, d, t, flags=re.IGNORECASE)
 
         return t
 
@@ -754,6 +769,15 @@ class NormalizationPipeline:
         if self.flags.get("enable_post_processing", True):
             current = self.postprocessor.apply(current)
             dbg["post"] = current
+        
+        # Restore unit protection placeholders that were added in parse()
+        # This happens after all processing to ensure time units remain protected
+        if hasattr(self.element_parser, 'unit_protection_map'):
+            for placeholder, original in self.element_parser.unit_protection_map.items():
+                current = current.replace(placeholder, original)
+            # Clear the map for next use
+            self.element_parser.unit_protection_map = {}
+        
         current = self.guard.unwrap(current)
         dbg["unwrapped"] = current
         return NormalizationResult(normalized_text=current, language=language, debug=dbg)
