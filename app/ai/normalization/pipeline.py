@@ -234,8 +234,8 @@ class DefaultElementParser:
             unit_counter += 1
             return placeholder
         
-        # Protect number-unit patterns
-        protected_text = re.sub(r'(\d+)\s+(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|‰|°c|°f)(?=\s|$)', 
+        # Protect number-unit patterns (includes all units from _UNIT_AFTER_RE)
+        protected_text = re.sub(r'(\d+)\s+(mm|cm|m|ml|mg|g|kg|µm|μm|um|%|°c|°f|week|weken|maand|maanden|jaar|jaren|dag|dagen|uur|u|minuut|minuten|min|seconde|seconden|sec)(?=\s|$)', 
                                protect_unit, protected_text, flags=re.IGNORECASE)
         
         # 6) Algemene paren (buiten context), maar check eerst of er al dental context is
@@ -248,17 +248,7 @@ class DefaultElementParser:
                 if re.search(r"\b(element|tand|kies|molaar|premolaar)\s*$", preceding_text, re.IGNORECASE):
                     return m.group(0)  # Don't modify if in dental context
             
-            # Unit guard: if a unit follows the matched number, don't convert to element
-            suffix = text[m.end():]
-            if _UNIT_AFTER_RE.match(suffix):
-                return m.group(0)  # Return original text unchanged
-            
-            # Also guard multi-digit numbers like "12", "13", "34" followed by units
-            # Check if the match represents a continuous multi-digit number (no separators)
-            matched_text = m.group(0)
-            if matched_text.replace(' ', '').isdigit() and len(matched_text.replace(' ', '')) >= 2:
-                if _UNIT_AFTER_RE.match(suffix):
-                    return m.group(0)  # Return original text unchanged
+            # Unit protection now happens earlier in step 5, so no need to check here
 
             nn = f"{m.group(1)}{m.group(2)}"
             return f"element {nn}" if nn in self.valid else m.group(0)
