@@ -49,20 +49,29 @@ class Settings(BaseSettings):
         description="JWT algorithm"
     )
     jwt_expiry_hours: int = Field(
-        default=1,
+        default=8,
         env="JWT_EXPIRY_HOURS",
         description="JWT token expiry in hours"
     )
     
     # CORS settings
+    cors_enabled: bool = Field(
+        default=False,
+        env="CORS_ENABLED",
+        description="Enable CORS middleware (disable for development troubleshooting)"
+    )
     allowed_origins: List[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
+            "http://localhost:8080",
             "http://localhost:8085",
             "http://localhost:8086",
             "http://localhost:8087",
             "http://localhost:8088",
             "http://localhost:8089",
+            "https://lovable.dev",
+            "https://dental-asr.ngrok.app",
+            "http://dental-asr.ngrok.app",
             "null"
         ],
         env="ALLOWED_ORIGINS",
@@ -71,7 +80,7 @@ class Settings(BaseSettings):
     
     # Rate limiting settings
     rate_limit_enabled: bool = Field(
-        default=True,
+        default=False,
         env="RATE_LIMIT_ENABLED",
         description="Enable rate limiting"
     )
@@ -252,6 +261,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"  # Ignore unknown environment variables
         
         # Use enum values in JSON
         use_enum_values = True

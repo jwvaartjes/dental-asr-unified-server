@@ -328,14 +328,18 @@ class DutchPhoneticMatcher:
         # Generate phonetic representations
         input_phonetics = self.to_phonetic(input_text)
         
+        # Collect exact matches and prioritize hyphenated forms
+        exact_matches = []
+        
         # PASS 1: Calculate base scores and gather candidate data
         cand_rows = []
         for candidate in candidates:
             candidate_norm = self.normalize_text(candidate)
             
-            # Direct match
+            # Collect direct matches instead of returning immediately
             if input_norm == candidate_norm:
-                return candidate, 1.0
+                exact_matches.append(candidate)
+                continue
             
             # Calculate base fuzzy score (without any phonetic boost)
             base_score = self._fuzzy_match_raw(input_text, candidate)
@@ -366,6 +370,17 @@ class DutchPhoneticMatcher:
                 "phonetic_match": phonetic_match,
                 "soundex": soundex_score
             })
+        
+        # Handle exact matches with hyphenated form preference
+        if exact_matches:
+            # Prioritize hyphenated forms for exact matches
+            hyphenated_matches = [match for match in exact_matches if '-' in match]
+            if hyphenated_matches:
+                # Return first hyphenated match (they should be equivalent)
+                return hyphenated_matches[0], 1.0
+            else:
+                # No hyphenated matches, return first exact match
+                return exact_matches[0], 1.0
         
         if not cand_rows:
             return None
@@ -399,8 +414,16 @@ class DutchPhoneticMatcher:
                     r["final"] = (r["final"] + r["soundex"] * 0.3) / 1.3
             # No Soundex blend for non-top candidates
         
-        # Find best final score
-        best_row = max(cand_rows, key=lambda x: x["final"])
+        # Find best final score, also prioritizing hyphenated forms in case of ties
+        best_score = max(r["final"] for r in cand_rows)
+        best_candidates = [r for r in cand_rows if r["final"] == best_score]
+        
+        # Among tied candidates, prefer hyphenated forms
+        hyphenated_candidates = [r for r in best_candidates if '-' in r["candidate"]]
+        if hyphenated_candidates:
+            best_row = hyphenated_candidates[0]
+        else:
+            best_row = best_candidates[0]
         
         if best_row["final"] >= self.fuzzy_threshold:
             return best_row["candidate"], best_row["final"]
@@ -616,10 +639,9 @@ class DutchPhoneticMatcher:
             match_result = self.match(clean_token, canonicals)
             
             if match_result and match_result[1] >= self.fuzzy_threshold:
-                # Replace with the matched canonical term, preserving case if original was capitalized
+                # Replace with the matched canonical term EXACTLY as it is
+                # Preserve all formatting: hyphens, capitals, punctuation, etc.
                 matched_canonical = match_result[0]
-                if token[0].isupper() and matched_canonical:
-                    matched_canonical = matched_canonical[0].upper() + matched_canonical[1:]
                 modified_tokens.append(matched_canonical)
             else:
                 # No match found, keep original token

@@ -26,20 +26,8 @@ class OpenAIASRProvider(ASRProvider):
         self.model_name = config.get('model', 'gpt-4o-transcribe')
         self.api_key = config.get('api_key') or os.getenv('OPENAI_API_KEY')
         
-        # Dental context prompts for better accuracy
-        self.dental_prompts = {
-            'nl': (
-                "Dit is een Nederlandse tandheelkundige consultatie. "
-                "Gebruik correcte tandheelkundige terminologie voor elementen, "
-                "bevindingen, behandelingen en anatomische structuren. "
-                "Element nummers zijn: 11-18, 21-28, 31-38, 41-48, 51-55, 61-65, 71-75, 81-85."
-            ),
-            'en': (
-                "This is a Dutch dental consultation in Dutch language. "
-                "Use correct dental terminology for elements, findings, treatments and anatomical structures. "
-                "Tooth numbers (elements) are: 11-18, 21-28, 31-38, 41-48, 51-55, 61-65, 71-75, 81-85."
-            )
-        }
+        # Default fallback prompt (matches legacy server fallback)
+        self.fallback_prompt = "Dit is een tandheelkundige opname met Nederlandse termen."
         
     async def initialize(self) -> bool:
         """Initialize OpenAI client."""
@@ -132,38 +120,51 @@ class OpenAIASRProvider(ASRProvider):
         
         try:
             # Prepare audio buffer
+            logger.debug(f"🔍 OpenAI provider received audio_data: type={type(audio_data)}, len={len(audio_data) if hasattr(audio_data, '__len__') else 'N/A'}")
+
             if isinstance(audio_data, bytes):
+                logger.debug("✅ Processing bytes audio data")
                 audio_buffer = io.BytesIO(audio_data)
                 audio_buffer.name = "audio.wav"
             elif isinstance(audio_data, io.BytesIO):
+                logger.debug("✅ Processing BytesIO audio data")
                 audio_buffer = audio_data
                 if not hasattr(audio_buffer, 'name'):
                     audio_buffer.name = "audio.wav"
             else:
+                logger.error(f"❌ Unsupported audio data type: {type(audio_data)} - Expected bytes or BytesIO")
                 raise TranscriptionError(
                     f"Unsupported audio data type: {type(audio_data)}",
                     provider_name="openai"
                 )
+
+            logger.debug(f"✅ Created audio_buffer for OpenAI: type={type(audio_buffer)}, name={getattr(audio_buffer, 'name', 'no name')}")
             
-            # Prepare transcription parameters
+            # Prepare transcription parameters (exactly like legacy server)
             language_code = language or "nl"  # Default to Dutch
-            
-            # Combine prompts
-            dental_prompt = self.dental_prompts.get(language_code, self.dental_prompts['nl'])
-            if prompt:
-                full_prompt = f"{dental_prompt} {prompt}"
-            else:
-                full_prompt = dental_prompt
+
+            # Get OpenAI-specific prompt from kwargs or use fallback (matches legacy logic)
+            openai_prompt = kwargs.get('openai_prompt', self.fallback_prompt)
+
+            # Use the passed prompt if provided, otherwise use openai_prompt (like legacy)
+            final_prompt = prompt if prompt else openai_prompt
+
+            logger.debug(f"OpenAI prompt strategy: passed_prompt={bool(prompt)}, openai_prompt_len={len(openai_prompt)}")
+            logger.debug(f"Final prompt: {final_prompt[:100]}..." if len(final_prompt) > 100 else f"Final prompt: {final_prompt}")
             
             # Make API call
             logger.debug(f"Transcribing audio with OpenAI (model: {self.model_name}, language: {language_code})")
             
+            # Reset buffer position (exactly like legacy server)
+            audio_buffer.seek(0)
+
             response = await self.client.audio.transcriptions.create(
                 model=self.model_name,
-                file=audio_buffer,
+                file=("audio.wav", audio_buffer, "audio/wav"),  # File tuple format like legacy
                 response_format="text",
                 language=language_code,
-                prompt=full_prompt
+                prompt=final_prompt,
+                temperature=0.0  # Deterministic temperature for consistency (like legacy)
             )
             
             # Handle response format variations
@@ -192,7 +193,8 @@ class OpenAIASRProvider(ASRProvider):
                 metadata={
                     'provider': 'openai',
                     'model': self.model_name,
-                    'prompt_used': full_prompt,
+                    'prompt_used': final_prompt,
+                    'temperature': 0.0,
                     'timestamp': datetime.utcnow().isoformat()
                 }
             )

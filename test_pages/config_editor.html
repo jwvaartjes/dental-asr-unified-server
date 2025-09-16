@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚙️ Supabase Config Editor</title>
+
+    <!-- Monaco Editor CDN - using specific version for stability -->
+    <script src="https://unpkg.com/monaco-editor@0.44.0/min/vs/loader.js"></script>
+
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #e1e8ed;
+            --shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a1a;
+            --card-bg: #2d2d2d;
+            --text-color: #ffffff;
+            --border-color: #404040;
+            --shadow: 0 2px 10px rgba(255,255,255,0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            transition: all 0.3s ease;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: var(--card-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .status-bar {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .status-item {
+            text-align: center;
+        }
+
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .status-label {
+            font-size: 0.9rem;
+            color: var(--text-color);
+            opacity: 0.7;
+            margin-top: 0.25rem;
+        }
+
+        .editor-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .tabs-header {
+            display: flex;
+            background: var(--bg-color);
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            padding: 0 1rem;
+        }
+
+        .tab {
+            padding: 1rem 1.5rem;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab:hover {
+            background: var(--card-bg);
+        }
+
+        .tab.active {
+            border-bottom-color: var(--primary-color);
+            color: var(--primary-color);
+            background: var(--card-bg);
+        }
+
+        .tab-content {
+            display: none;
+            height: 600px;
+            position: relative;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .editor-wrapper {
+            height: 100%;
+            position: relative;
+        }
+
+        .monaco-editor {
+            height: 100% !important;
+            width: 100% !important;
+            position: relative !important;
+        }
+
+        .section-info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--primary-color);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            z-index: 100;
+            opacity: 0.9;
+        }
+
+        .actions-bar {
+            background: var(--bg-color);
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .actions-left, .actions-right {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 2rem;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-color);
+        }
+
+        .diff-container {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        .diff-line {
+            padding: 2px 8px;
+            white-space: pre-wrap;
+        }
+
+        .diff-added {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .diff-removed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .theme-toggle {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 6px;
+            padding: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 3000;
+            max-width: 400px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: var(--success-color);
+        }
+
+        .notification.error {
+            background: var(--danger-color);
+        }
+
+        .notification.warning {
+            background: var(--warning-color);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .header-content {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .tab-content {
+                height: 400px;
+            }
+
+            .actions-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .actions-left, .actions-right {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body data-theme="light">
+    <header class="header">
+        <div class="header-content">
+            <h1>⚙️ Supabase Configuration Editor</h1>
+            <div class="header-actions">
+                <button class="btn btn-secondary theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light Theme">
+                    🌙
+                </button>
+                <a href="/api-test" class="btn btn-secondary">🧪 API Tests</a>
+                <a href="/docs" class="btn btn-secondary">📚 API Docs</a>
+                <a href="/" class="btn btn-secondary">🏠 Home</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-value" id="sectionsCount">--</div>
+                    <div class="status-label">Config Sections</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="lastModified">--</div>
+                    <div class="status-label">Last Modified</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="configSize">--</div>
+                    <div class="status-label">Size (KB)</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="connectionStatus">--</div>
+                    <div class="status-label">Connection</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config Editor -->
+        <div class="editor-container">
+            <div class="tabs-header">
+                <div class="tab active" data-section="silero_vad">
+                    🎤 Silero VAD
+                </div>
+                <div class="tab" data-section="frontend_vad">
+                    📱 Frontend VAD
+                </div>
+                <div class="tab" data-section="openai_prompt">
+                    🤖 OpenAI Prompt
+                </div>
+                <div class="tab" data-section="default_prompt">
+                    💬 Default Prompt
+                </div>
+                <div class="tab" data-section="matching">
+                    🎯 Matching
+                </div>
+                <div class="tab" data-section="phonetic_patterns">
+                    🔤 Phonetic
+                </div>
+                <div class="tab" data-section="variant_generation">
+                    🔄 Variants
+                </div>
+                <div class="tab" data-section="postprocess">
+                    ✨ Postprocess
+                </div>
+                <div class="tab" data-section="element_separators">
+                    📋 Separators
+                </div>
+                <div class="tab" data-section="prefixes">
+                    🏷️ Prefixes
+                </div>
+                <div class="tab" data-section="suffix_groups">
+                    📝 Suffix Groups
+                </div>
+                <div class="tab" data-section="suffix_patterns">
+                    🎨 Suffix Patterns
+                </div>
+            </div>
+
+            <!-- Tab Contents -->
+            <div id="tab-silero_vad" class="tab-content active">
+                <div class="section-info">Voice Activity Detection</div>
+                <div class="editor-wrapper">
+                    <div id="editor-silero_vad" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-frontend_vad" class="tab-content">
+                <div class="section-info">Frontend Audio Processing</div>
+                <div class="editor-wrapper">
+                    <div id="editor-frontend_vad" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-openai_prompt" class="tab-content">
+                <div class="section-info">AI Transcription Prompts</div>
+                <div class="editor-wrapper">
+                    <div id="editor-openai_prompt" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-default_prompt" class="tab-content">
+                <div class="section-info">Default AI Prompt</div>
+                <div class="editor-wrapper">
+                    <div id="editor-default_prompt" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-matching" class="tab-content">
+                <div class="section-info">Text Matching Configuration</div>
+                <div class="editor-wrapper">
+                    <div id="editor-matching" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-phonetic_patterns" class="tab-content">
+                <div class="section-info">Phonetic Matching Patterns</div>
+                <div class="editor-wrapper">
+                    <div id="editor-phonetic_patterns" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-variant_generation" class="tab-content">
+                <div class="section-info">Text Variant Generation</div>
+                <div class="editor-wrapper">
+                    <div id="editor-variant_generation" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-postprocess" class="tab-content">
+                <div class="section-info">Text Post-processing Rules</div>
+                <div class="editor-wrapper">
+                    <div id="editor-postprocess" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-element_separators" class="tab-content">
+                <div class="section-info">Element Separator Configuration</div>
+                <div class="editor-wrapper">
+                    <div id="editor-element_separators" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-prefixes" class="tab-content">
+                <div class="section-info">Dental Term Prefixes</div>
+                <div class="editor-wrapper">
+                    <div id="editor-prefixes" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-suffix_groups" class="tab-content">
+                <div class="section-info">Linguistic Suffix Groups</div>
+                <div class="editor-wrapper">
+                    <div id="editor-suffix_groups" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <div id="tab-suffix_patterns" class="tab-content">
+                <div class="section-info">Suffix Pattern Rules</div>
+                <div class="editor-wrapper">
+                    <div id="editor-suffix_patterns" class="monaco-editor"></div>
+                </div>
+            </div>
+
+            <!-- Actions Bar -->
+            <div class="actions-bar">
+                <div class="actions-left">
+                    <button class="btn btn-primary" onclick="loadConfig()" id="loadBtn">
+                        🔄 Reload Config
+                    </button>
+                    <button class="btn btn-warning" onclick="showChanges()" id="changesBtn" disabled>
+                        👁️ View Changes
+                    </button>
+                </div>
+                <div class="actions-right">
+                    <button class="btn btn-secondary" onclick="downloadBackup()">
+                        💾 Download Backup
+                    </button>
+                    <button class="btn btn-danger" onclick="resetSection()">
+                        ↺ Reset Section
+                    </button>
+                    <button class="btn btn-success" onclick="saveConfig()" id="saveBtn" disabled>
+                        💾 Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="changesModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">📋 Configuration Changes</h2>
+                <button class="close-btn" onclick="closeModal('changesModal')">&times;</button>
+            </div>
+            <div id="changesContent">
+                <!-- Changes will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">⚠️ Confirm Action</h2>
+                <button class="close-btn" onclick="closeModal('confirmModal')">&times;</button>
+            </div>
+            <div id="confirmContent">
+                <!-- Confirmation content will be populated here -->
+            </div>
+            <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                <button class="btn btn-secondary" onclick="closeModal('confirmModal')">Cancel</button>
+                <button class="btn btn-danger" id="confirmBtn" onclick="confirmAction()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let monaco;
+        let editors = {};
+        let originalConfig = {};
+        let currentConfig = {};
+        let currentSection = 'silero_vad';
+        let pendingAction = null;
+
+        // Configuration sections metadata
+        const sectionInfo = {
+            'silero_vad': {
+                name: 'Silero VAD',
+                description: 'Voice Activity Detection settings for Silero VAD model',
+                category: 'Audio Processing'
+            },
+            'frontend_vad': {
+                name: 'Frontend VAD',
+                description: 'Frontend voice activity detection and audio processing',
+                category: 'Audio Processing'
+            },
+            'openai_prompt': {
+                name: 'OpenAI Prompt',
+                description: 'Specialized prompt for OpenAI transcription service',
+                category: 'AI Configuration'
+            },
+            'default_prompt': {
+                name: 'Default Prompt',
+                description: 'Default prompt for transcription services',
+                category: 'AI Configuration'
+            },
+            'matching': {
+                name: 'Text Matching',
+                description: 'Fuzzy matching and similarity thresholds',
+                category: 'Normalization'
+            },
+            'phonetic_patterns': {
+                name: 'Phonetic Patterns',
+                description: 'Phonetic matching patterns for Dutch dental terms',
+                category: 'Normalization'
+            },
+            'variant_generation': {
+                name: 'Variant Generation',
+                description: 'Text variant generation rules and separators',
+                category: 'Normalization'
+            },
+            'postprocess': {
+                name: 'Post-processing',
+                description: 'Text cleanup and post-processing rules',
+                category: 'Normalization'
+            },
+            'element_separators': {
+                name: 'Element Separators',
+                description: 'Separators used in dental element parsing',
+                category: 'Parsing'
+            },
+            'prefixes': {
+                name: 'Prefixes',
+                description: 'Dental terminology prefixes list',
+                category: 'Linguistics'
+            },
+            'suffix_groups': {
+                name: 'Suffix Groups',
+                description: 'Grouped linguistic suffix patterns',
+                category: 'Linguistics'
+            },
+            'suffix_patterns': {
+                name: 'Suffix Patterns',
+                description: 'Categorized suffix patterns for word recognition',
+                category: 'Linguistics'
+            }
+        };
+
+        // Initialize when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeMonaco();
+            setupEventListeners();
+            loadConfig();
+        });
+
+        // Initialize Monaco Editor
+        async function initializeMonaco() {
+            try {
+                console.log('🔄 Initializing Monaco Editor...');
+
+                // Wait for require to be available
+                if (typeof require === 'undefined') {
+                    throw new Error('Monaco loader not available');
+                }
+
+                // Configure paths to use stable version
+                require.config({
+                    paths: {
+                        vs: 'https://unpkg.com/monaco-editor@0.44.0/min/vs'
+                    }
+                });
+
+                // Load Monaco with timeout
+                monaco = await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Monaco loading timeout'));
+                    }, 10000);
+
+                    require(['vs/editor/editor.main'], function(m) {
+                        clearTimeout(timeout);
+                        console.log('✅ Monaco module loaded:', !!m);
+                        resolve(m);
+                    }, function(err) {
+                        clearTimeout(timeout);
+                        console.error('❌ Monaco require error:', err);
+                        reject(err);
+                    });
+                });
+
+                // Verify Monaco is properly loaded
+                if (!monaco || !monaco.editor || !monaco.languages) {
+                    throw new Error('Monaco editor not properly initialized');
+                }
+
+                console.log('✅ Monaco loaded successfully');
+
+                // Configure JSON schema for better validation
+                if (monaco.languages && monaco.languages.json) {
+                    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+                        validate: true,
+                        allowComments: false,
+                        schemas: [{
+                            uri: "http://myserver/foo-schema.json",
+                            fileMatch: ["*"],
+                            schema: {
+                                type: "object",
+                                additionalProperties: true
+                            }
+                        }]
+                    });
+                }
+
+                // Create editors for each section
+                let editorsCreated = 0;
+                Object.keys(sectionInfo).forEach(section => {
+                    const container = document.getElementById(`editor-${section}`);
+                    if (container) {
+                        console.log(`Creating editor for section: ${section}`);
+                        editors[section] = monaco.editor.create(container, {
+                            value: '{\n  "loading": "Please wait..."\n}',
+                            language: 'json',
+                            theme: document.body.getAttribute('data-theme') === 'dark' ? 'vs-dark' : 'vs',
+                            formatOnPaste: true,
+                            formatOnType: true,
+                            automaticLayout: true,
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            wordWrap: 'on',
+                            lineNumbers: 'on',
+                            glyphMargin: true,
+                            folding: true,
+                            lineDecorationsWidth: 10,
+                            overviewRulerBorder: false
+                        });
+
+                        // Listen for changes
+                        editors[section].onDidChangeModelContent(() => {
+                            onContentChange(section);
+                        });
+
+                        editorsCreated++;
+                    } else {
+                        console.error(`Container not found for section: ${section}`);
+                    }
+                });
+
+                console.log(`✅ Monaco Editor initialized with ${editorsCreated} editors`);
+
+                // Force layout of all editors after initialization
+                setTimeout(() => {
+                    Object.values(editors).forEach(editor => {
+                        if (editor && editor.layout) {
+                            editor.layout();
+                        }
+                    });
+                    console.log('🔧 Forced layout of all editors');
+                }, 500);
+
+            } catch (error) {
+                console.error('❌ Failed to initialize Monaco Editor:', error);
+                showNotification('Monaco failed to load, using fallback editor', 'warning');
+
+                // Fallback to simple textareas
+                initializeFallbackEditors();
+            }
+        }
+
+        // Fallback editors using textarea
+        function initializeFallbackEditors() {
+            console.log('🔄 Initializing fallback editors...');
+
+            Object.keys(sectionInfo).forEach(section => {
+                const container = document.getElementById(`editor-${section}`);
+                if (container) {
+                    // Clear container and create textarea
+                    container.innerHTML = '';
+
+                    const textarea = document.createElement('textarea');
+                    textarea.style.width = '100%';
+                    textarea.style.height = '100%';
+                    textarea.style.fontFamily = 'Courier New, monospace';
+                    textarea.style.fontSize = '14px';
+                    textarea.style.padding = '10px';
+                    textarea.style.border = 'none';
+                    textarea.style.resize = 'none';
+                    textarea.style.outline = 'none';
+                    textarea.value = '{\n  "loading": "Please wait..."\n}';
+
+                    container.appendChild(textarea);
+
+                    // Create fallback editor object
+                    editors[section] = {
+                        getValue: () => textarea.value,
+                        setValue: (value) => { textarea.value = value; },
+                        onDidChangeModelContent: (callback) => {
+                            textarea.addEventListener('input', callback);
+                        },
+                        layout: () => {} // No-op for fallback
+                    };
+
+                    // Listen for changes
+                    textarea.addEventListener('input', () => {
+                        onContentChange(section);
+                    });
+                }
+            });
+
+            console.log('✅ Fallback editors initialized');
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Tab switching
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const section = this.getAttribute('data-section');
+                    switchTab(section);
+                });
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey || e.metaKey) {
+                    switch(e.key) {
+                        case 's':
+                            e.preventDefault();
+                            saveConfig();
+                            break;
+                        case 'r':
+                            e.preventDefault();
+                            loadConfig();
+                            break;
+                    }
+                }
+            });
+        }
+
+        // Switch between tabs
+        function switchTab(section) {
+            // Update tab appearance
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-section="${section}"]`).classList.add('active');
+
+            // Show corresponding content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${section}`).classList.add('active');
+
+            currentSection = section;
+
+            // Layout editor
+            if (editors[section]) {
+                setTimeout(() => editors[section].layout(), 100);
+            }
+        }
+
+        // Load configuration from server
+        async function loadConfig() {
+            const loadBtn = document.getElementById('loadBtn');
+            const originalText = loadBtn.innerHTML;
+
+            try {
+                loadBtn.innerHTML = '<span class="spinner"></span> Loading...';
+                loadBtn.disabled = true;
+
+                console.log('Loading config from /api/ai/normalization/config...');
+                const response = await fetch('/api/ai/normalization/config');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('Config loaded:', data);
+                originalConfig = data.config;
+                currentConfig = JSON.parse(JSON.stringify(originalConfig)); // Deep copy
+
+                // Update editors with loaded config
+                Object.keys(sectionInfo).forEach(section => {
+                    console.log(`Loading section ${section}:`, originalConfig[section]);
+                    if (editors[section] && originalConfig[section]) {
+                        const value = JSON.stringify(originalConfig[section], null, 2);
+                        editors[section].setValue(value);
+                        console.log(`Set value for ${section}: ${value.substring(0, 100)}...`);
+
+                        // Force layout after setting value
+                        setTimeout(() => {
+                            if (editors[section].layout) {
+                                editors[section].layout();
+                            }
+                        }, 100);
+                    } else {
+                        console.warn(`Missing data for section ${section}:`, {
+                            hasEditor: !!editors[section],
+                            hasData: !!originalConfig[section]
+                        });
+                        // Set empty object if no data
+                        if (editors[section]) {
+                            editors[section].setValue('{}');
+                            setTimeout(() => {
+                                if (editors[section].layout) {
+                                    editors[section].layout();
+                                }
+                            }, 100);
+                        }
+                    }
+                });
+
+                updateStatus(data);
+                updateButtons();
+                showNotification('Config loaded successfully', 'success');
+
+            } catch (error) {
+                console.error('Failed to load config:', error);
+                showNotification(`Failed to load config: ${error.message}`, 'error');
+            } finally {
+                loadBtn.innerHTML = originalText;
+                loadBtn.disabled = false;
+            }
+        }
+
+        // Save configuration to server
+        async function saveConfig() {
+            const saveBtn = document.getElementById('saveBtn');
+            const originalText = saveBtn.innerHTML;
+
+            try {
+                // Validate all sections first
+                const errors = validateAllSections();
+                if (errors.length > 0) {
+                    showNotification(`Validation errors: ${errors.join(', ')}`, 'error');
+                    return;
+                }
+
+                saveBtn.innerHTML = '<span class="spinner"></span> Saving...';
+                saveBtn.disabled = true;
+
+                // Collect current values from all editors
+                const configToSave = {};
+                Object.keys(sectionInfo).forEach(section => {
+                    if (editors[section]) {
+                        try {
+                            const value = editors[section].getValue();
+                            configToSave[section] = JSON.parse(value);
+                        } catch (e) {
+                            throw new Error(`Invalid JSON in ${section}: ${e.message}`);
+                        }
+                    }
+                });
+
+                const response = await fetch('/api/ai/config/save', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(configToSave)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                // Update original config to match saved config
+                originalConfig = JSON.parse(JSON.stringify(configToSave));
+                currentConfig = JSON.parse(JSON.stringify(configToSave));
+
+                updateButtons();
+                showNotification('Configuration saved successfully!', 'success');
+
+            } catch (error) {
+                console.error('Failed to save config:', error);
+                showNotification(`Failed to save config: ${error.message}`, 'error');
+            } finally {
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }
+
+        // Handle content changes
+        function onContentChange(section) {
+            try {
+                const value = editors[section].getValue();
+                currentConfig[section] = JSON.parse(value);
+            } catch (e) {
+                // Invalid JSON - will be caught during validation
+            }
+            updateButtons();
+        }
+
+        // Update status information
+        function updateStatus(data) {
+            document.getElementById('sectionsCount').textContent = Object.keys(data.config).length;
+            document.getElementById('configSize').textContent = Math.round(JSON.stringify(data.config).length / 1024);
+            document.getElementById('connectionStatus').textContent = data.data_source === 'supabase' ? '✅ Online' : '❌ Offline';
+
+            if (data.timestamp) {
+                const date = new Date(data.timestamp);
+                document.getElementById('lastModified').textContent = date.toLocaleString();
+            }
+        }
+
+        // Update button states
+        function updateButtons() {
+            const hasChanges = hasConfigChanges();
+            document.getElementById('saveBtn').disabled = !hasChanges;
+            document.getElementById('changesBtn').disabled = !hasChanges;
+        }
+
+        // Check if configuration has changes
+        function hasConfigChanges() {
+            return Object.keys(sectionInfo).some(section => {
+                if (!editors[section]) return false;
+
+                try {
+                    const currentValue = JSON.parse(editors[section].getValue());
+                    return JSON.stringify(originalConfig[section]) !== JSON.stringify(currentValue);
+                } catch (e) {
+                    return true; // Invalid JSON counts as change
+                }
+            });
+        }
+
+        // Validate all sections
+        function validateAllSections() {
+            const errors = [];
+
+            Object.keys(sectionInfo).forEach(section => {
+                if (editors[section]) {
+                    try {
+                        const value = editors[section].getValue();
+                        JSON.parse(value);
+                    } catch (e) {
+                        errors.push(`${sectionInfo[section].name}: ${e.message}`);
+                    }
+                }
+            });
+
+            return errors;
+        }
+
+        // Show changes modal
+        function showChanges() {
+            const changes = getConfigChanges();
+            const changesContent = document.getElementById('changesContent');
+
+            if (changes.length === 0) {
+                changesContent.innerHTML = '<p>No changes detected.</p>';
+            } else {
+                changesContent.innerHTML = `
+                    <div style="margin-bottom: 1rem;">
+                        <strong>${changes.length} section(s) modified:</strong>
+                    </div>
+                    <div class="diff-container">
+                        ${changes.map(change => `
+                            <div style="margin-bottom: 1rem;">
+                                <strong>${sectionInfo[change.section].name}:</strong>
+                                <div class="diff-line diff-removed">- ${JSON.stringify(change.original, null, 2)}</div>
+                                <div class="diff-line diff-added">+ ${JSON.stringify(change.current, null, 2)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            showModal('changesModal');
+        }
+
+        // Get configuration changes
+        function getConfigChanges() {
+            const changes = [];
+
+            Object.keys(sectionInfo).forEach(section => {
+                if (editors[section]) {
+                    try {
+                        const currentValue = JSON.parse(editors[section].getValue());
+                        if (JSON.stringify(originalConfig[section]) !== JSON.stringify(currentValue)) {
+                            changes.push({
+                                section: section,
+                                original: originalConfig[section],
+                                current: currentValue
+                            });
+                        }
+                    } catch (e) {
+                        // Invalid JSON - include as change
+                        changes.push({
+                            section: section,
+                            original: originalConfig[section],
+                            current: `Invalid JSON: ${e.message}`
+                        });
+                    }
+                }
+            });
+
+            return changes;
+        }
+
+        // Reset current section
+        function resetSection() {
+            const sectionName = sectionInfo[currentSection].name;
+            showConfirmModal(
+                `Reset ${sectionName}`,
+                `Are you sure you want to reset "${sectionName}" to its original value? This will discard all unsaved changes in this section.`,
+                () => {
+                    if (editors[currentSection] && originalConfig[currentSection]) {
+                        const value = JSON.stringify(originalConfig[currentSection], null, 2);
+                        editors[currentSection].setValue(value);
+                        showNotification(`${sectionName} reset successfully`, 'success');
+                    }
+                }
+            );
+        }
+
+        // Download configuration backup
+        function downloadBackup() {
+            const configData = JSON.stringify(originalConfig, null, 2);
+            const blob = new Blob([configData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `supabase-config-backup-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showNotification('Config backup downloaded', 'success');
+        }
+
+        // Theme toggle
+        function toggleTheme() {
+            const currentTheme = document.body.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            document.body.setAttribute('data-theme', newTheme);
+            document.querySelector('.theme-toggle').textContent = newTheme === 'dark' ? '☀️' : '🌙';
+
+            // Update Monaco theme
+            const monacoTheme = newTheme === 'dark' ? 'vs-dark' : 'vs';
+            Object.values(editors).forEach(editor => {
+                if (editor) {
+                    monaco.editor.setTheme(monacoTheme);
+                }
+            });
+
+            localStorage.setItem('config-editor-theme', newTheme);
+        }
+
+        // Modal functions
+        function showModal(modalId) {
+            document.getElementById(modalId).style.display = 'flex';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function showConfirmModal(title, message, onConfirm) {
+            document.querySelector('#confirmModal .modal-title').textContent = title;
+            document.getElementById('confirmContent').innerHTML = `<p>${message}</p>`;
+            pendingAction = onConfirm;
+            showModal('confirmModal');
+        }
+
+        function confirmAction() {
+            if (pendingAction) {
+                pendingAction();
+                pendingAction = null;
+            }
+            closeModal('confirmModal');
+        }
+
+        // Notification system
+        function showNotification(message, type = 'success') {
+            // Remove existing notifications
+            document.querySelectorAll('.notification').forEach(n => n.remove());
+
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+
+            document.body.appendChild(notification);
+
+            // Show notification
+            setTimeout(() => notification.classList.add('show'), 100);
+
+            // Hide notification after 5 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+
+        // Load saved theme on startup
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedTheme = localStorage.getItem('config-editor-theme');
+            if (savedTheme) {
+                document.body.setAttribute('data-theme', savedTheme);
+                document.querySelector('.theme-toggle').textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+            }
+        });
+    </script>
+</body>
+</html>

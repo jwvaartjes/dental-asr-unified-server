@@ -4,6 +4,7 @@ Handles JWT tokens, origin validation, and rate limiting.
 """
 import os
 import jwt
+import re
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 # JWT Configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "test-secret-key-for-local-testing")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 1
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "8"))
 
 
 class JWTHandler:
@@ -56,29 +57,39 @@ class JWTHandler:
 
 class OriginValidator:
     """Validate request origins for CORS security."""
-    
+
     def __init__(self, allowed_origins: List[str]):
         self.allowed_origins = allowed_origins
-    
+        # Same regex pattern as CORS middleware in main.py
+        self.allowed_origin_regex = re.compile(
+            r"https://.*\.lovable\.app|https://.*\.lovable\.dev|https://.*\.lovableproject\.com|https://.*\.ngrok\.app|https://.*\.ngrok\.io|https://.*\.mondplan\.com"
+        )
+
     def validate_http_origin(self, request: Request) -> bool:
         """Validate HTTP request origin."""
         origin = request.headers.get("origin", "")
         return self._is_allowed(origin)
-    
+
     def validate_websocket_origin(self, websocket: WebSocket) -> bool:
         """Validate WebSocket connection origin."""
         origin = websocket.headers.get("origin", "")
         return self._is_allowed(origin)
-    
+
     def _is_allowed(self, origin: str) -> bool:
-        """Check if origin is in allowed list."""
+        """Check if origin is in allowed list or matches regex patterns."""
         if not origin:
             return "null" in self.allowed_origins
-        
-        return any(
+
+        # Check exact match or prefix match with allowed origins list
+        exact_or_prefix_match = any(
             origin == allowed or origin.startswith(allowed)
             for allowed in self.allowed_origins
         )
+
+        # Check regex pattern match (same as CORS middleware)
+        regex_match = bool(self.allowed_origin_regex.match(origin))
+
+        return exact_or_prefix_match or regex_match
 
 
 class SecurityMiddleware:

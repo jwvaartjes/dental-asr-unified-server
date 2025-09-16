@@ -14,8 +14,9 @@ class PairingStore(ABC):
     """Abstract interface for pairing data storage."""
     
     @abstractmethod
-    async def store_pairing(self, code: str, desktop_session_id: str, ttl: int = 3600) -> bool:
-        """Store a pairing code with desktop session ID."""
+    async def store_pairing(self, code: str, desktop_session_id: str, ttl: int = 3600,
+                           desktop_auth_info: Optional[Dict] = None) -> bool:
+        """Store a pairing code with desktop session ID and optional auth info."""
         pass
     
     @abstractmethod
@@ -26,6 +27,11 @@ class PairingStore(ABC):
     @abstractmethod
     async def consume_pairing(self, code: str) -> Optional[str]:
         """Get and remove pairing code (one-time use)."""
+        pass
+
+    @abstractmethod
+    async def get_pairing_with_auth(self, code: str) -> Optional[Dict]:
+        """Get desktop session ID and auth info for a pairing code."""
         pass
     
     @abstractmethod
@@ -48,20 +54,21 @@ class InMemoryPairingStore(PairingStore):
     """In-memory implementation for development/testing."""
     
     def __init__(self):
-        self.pairings: Dict[str, tuple[str, datetime]] = {}  # code -> (desktop_id, expiry)
+        self.pairings: Dict[str, tuple[str, datetime, Optional[Dict]]] = {}  # code -> (desktop_id, expiry, auth_info)
         self.channels: Dict[str, Dict[str, str]] = {}  # channel_id -> {client_id: device_type}
     
-    async def store_pairing(self, code: str, desktop_session_id: str, ttl: int = 3600) -> bool:
-        """Store pairing with expiry."""
+    async def store_pairing(self, code: str, desktop_session_id: str, ttl: int = 3600,
+                           desktop_auth_info: Optional[Dict] = None) -> bool:
+        """Store pairing with expiry and optional auth info."""
         expiry = datetime.utcnow() + timedelta(seconds=ttl)
-        self.pairings[code] = (desktop_session_id, expiry)
-        logger.info(f"Stored pairing {code} -> {desktop_session_id} (expires: {expiry})")
+        self.pairings[code] = (desktop_session_id, expiry, desktop_auth_info)
+        logger.info(f"Stored pairing {code} -> {desktop_session_id} with auth: {bool(desktop_auth_info)} (expires: {expiry})")
         return True
     
     async def get_pairing(self, code: str) -> Optional[str]:
         """Get desktop session ID if not expired."""
         if code in self.pairings:
-            desktop_id, expiry = self.pairings[code]
+            desktop_id, expiry, _ = self.pairings[code]
             if datetime.utcnow() < expiry:
                 return desktop_id
             else:
@@ -77,7 +84,22 @@ class InMemoryPairingStore(PairingStore):
             del self.pairings[code]
             logger.info(f"Consumed pairing {code}")
         return desktop_id
-    
+
+    async def get_pairing_with_auth(self, code: str) -> Optional[Dict]:
+        """Get desktop session ID and auth info if not expired."""
+        if code in self.pairings:
+            desktop_id, expiry, auth_info = self.pairings[code]
+            if datetime.utcnow() < expiry:
+                return {
+                    "desktop_session_id": desktop_id,
+                    "auth_info": auth_info or {}
+                }
+            else:
+                # Clean up expired pairing
+                del self.pairings[code]
+                logger.info(f"Pairing {code} expired")
+        return None
+
     async def add_to_channel(self, channel_id: str, client_id: str, device_type: str) -> bool:
         """Add client to channel."""
         if channel_id not in self.channels:

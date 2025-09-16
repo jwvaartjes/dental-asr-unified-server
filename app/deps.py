@@ -5,6 +5,7 @@ import sys
 import os
 import logging
 from typing import Optional
+from fastapi import Request
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,6 +24,7 @@ from app.data import (
     InMemoryCache,
     SupabaseLoader
 )
+from app.templates.service import TemplateService
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +112,18 @@ def get_data_registry():
         raise RuntimeError(f"Data layer initialization failed: {e}")
 
 
+# Template functionality temporarily disabled - requires old workspace dependencies
+def get_template_service(request: Request) -> TemplateService:
+    """Get template service instance from app state."""
+    return request.app.state.template_service
+
+def get_admin_user_id(request: Request) -> str:
+    """Get the admin user ID for template operations."""
+    # Use the same pattern as other services
+    data_registry = request.app.state.data_registry
+    return data_registry.loader.get_admin_id()
+
+
 def setup_dependencies(settings: Settings):
     """Setup all dependencies and return them."""
     # Setup logging
@@ -134,7 +148,10 @@ def setup_dependencies(settings: Settings):
     
     # Create data layer
     data_registry = get_data_registry()
-    
+
+    # Create template service
+    template_service = TemplateService(data_registry.loader)
+
     return {
         "connection_manager": connection_manager,
         "pairing_service": pairing_service,
@@ -144,5 +161,6 @@ def setup_dependencies(settings: Settings):
         "http_rate_limiter": http_rate_limiter,
         "connection_tracker": connection_tracker,
         "data_registry": data_registry,
+        "template_service": template_service,
         "settings": settings
     }

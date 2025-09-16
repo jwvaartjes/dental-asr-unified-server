@@ -21,17 +21,18 @@ async def test():
     
     pipeline = await NormalizationFactory.create_for_admin(data_registry)
     
-    # Test case that's failing
-    test_input = "een twee weken"
-    result = pipeline.normalize(test_input, debug=True)
+    # Test case that's failing - periapicaal fix
+    test_input = "periapicaal"
+    result = pipeline.normalize(test_input)
     
     print(f"Input: '{test_input}'")
     print("=" * 50)
-    print("Normalization steps:")
-    for step_name, step_result in result.debug.items():
-        print(f"  {step_name}: '{step_result}'")
-    print("=" * 50)
     print(f"Final result: '{result.normalized_text}'")
-    print(f"Expected: 'een twee weken'")
+    print(f"Expected: 'peri-apicaal'")
+    
+    if result.normalized_text == 'peri-apicaal':
+        print("✅ SUCCESS: periapicaal hyphen fix works!")
+    else:
+        print("❌ FAILED: periapicaal hyphen fix needs more work")
 
 asyncio.run(test())

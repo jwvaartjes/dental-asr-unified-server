@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Audio Streaming Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.connecting { background-color: #fff3cd; color: #856404; }
+        .status.connected { background-color: #d4edda; color: #155724; }
+        .status.disconnected { background-color: #f8d7da; color: #721c24; }
+        .status.recording { background-color: #cce5ff; color: #004085; }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background-color: #1e7e34;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+
+        .transcription {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+            min-height: 100px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+
+        .config {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+
+        .config label {
+            display: inline-block;
+            width: 200px;
+            margin-bottom: 10px;
+        }
+
+        .config input {
+            width: 100px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+
+        .metric {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        #audioLevelBar {
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        #audioLevel {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #ffc107, #dc3545);
+            width: 0%;
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Desktop Audio Streaming Test</h1>
+        <p style="text-align: center; color: #666;">
+            Test real-time audio streaming to the unified pairing server (port 8089)
+        </p>
+
+        <div id="connectionStatus" class="status disconnected">
+            ❌ Not Connected
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="btn-primary">Connect WebSocket</button>
+            <button id="startRecordingBtn" class="btn-success" disabled>Start Recording</button>
+            <button id="stopRecordingBtn" class="btn-danger" disabled>Stop Recording</button>
+            <button id="clearBtn" class="btn-secondary">Clear Transcription</button>
+        </div>
+
+        <div class="config">
+            <h3>Audio Configuration (SPSC Testing)</h3>
+            <label>Sample Rate:</label>
+            <input type="number" id="sampleRate" value="16000"> Hz<br>
+
+            <label>Chunk Size:</label>
+            <input type="number" id="chunkSize" value="1024"> bytes<br>
+
+            <label>Send Interval:</label>
+            <input type="number" id="sendInterval" value="50"> ms<br>
+
+            <label>Test Mode:</label>
+            <select id="testMode">
+                <option value="small">Small Chunks (test accumulation)</option>
+                <option value="large">Large Chunks (test immediate processing)</option>
+                <option value="mixed">Mixed Chunks (realistic)</option>
+            </select><br>
+
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                📝 SPSC Logic: Small chunks (&lt;16KB) accumulate (10 chunks max), large chunks (&gt;16KB) process immediately
+            </p>
+        </div>
+
+        <div id="audioLevelBar">
+            <div id="audioLevel"></div>
+        </div>
+
+        <div class="metrics">
+            <div class="metric">
+                <strong>Chunks Sent:</strong><br>
+                <span id="chunksSent">0</span>
+            </div>
+            <div class="metric">
+                <strong>Total Bytes:</strong><br>
+                <span id="totalBytes">0</span>
+            </div>
+            <div class="metric">
+                <strong>Recording Time:</strong><br>
+                <span id="recordingTime">0s</span>
+            </div>
+        </div>
+
+        <h3>Real-time Transcription Results:</h3>
+        <div id="transcriptionOutput" class="transcription">
+            Transcription results will appear here...
+        </div>
+    </div>
+
+    <script>
+        let websocket = null;
+        let mediaRecorder = null;
+        let audioStream = null;
+        let audioContext = null;
+        let processor = null;
+        let isRecording = false;
+        let startTime = 0;
+        let chunksSent = 0;
+        let totalBytes = 0;
+        let recordingTimer = null;
+
+        // UI Elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const connectBtn = document.getElementById('connectBtn');
+        const startRecordingBtn = document.getElementById('startRecordingBtn');
+        const stopRecordingBtn = document.getElementById('stopRecordingBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const transcriptionOutput = document.getElementById('transcriptionOutput');
+        const chunksSentDisplay = document.getElementById('chunksSent');
+        const totalBytesDisplay = document.getElementById('totalBytes');
+        const recordingTimeDisplay = document.getElementById('recordingTime');
+        const audioLevel = document.getElementById('audioLevel');
+
+        // Connect to WebSocket
+        connectBtn.addEventListener('click', connectWebSocket);
+        startRecordingBtn.addEventListener('click', startRecording);
+        stopRecordingBtn.addEventListener('click', stopRecording);
+        clearBtn.addEventListener('click', clearTranscription);
+
+        function connectWebSocket() {
+            if (websocket) {
+                websocket.close();
+            }
+
+            updateStatus('connecting', '🔄 Connecting...');
+            connectBtn.disabled = true;
+
+            // Connect to unified server on port 8089
+            const wsUrl = 'ws://localhost:8089/ws';
+            websocket = new WebSocket(wsUrl);
+
+            websocket.onopen = function(event) {
+                console.log('WebSocket connected');
+                updateStatus('connected', '✅ Connected to Server');
+                connectBtn.textContent = 'Disconnect';
+                connectBtn.disabled = false;
+                startRecordingBtn.disabled = false;
+
+                // Send identification message
+                websocket.send(JSON.stringify({
+                    type: 'identify',
+                    device_type: 'desktop'
+                }));
+            };
+
+            websocket.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log('Received message:', message);
+
+                    if (message.type === 'transcription_result') {
+                        displayTranscription(message);
+                    } else if (message.type === 'transcription_error') {
+                        displayError(message.error);
+                    }
+                } catch (e) {
+                    console.log('Received non-JSON message:', event.data);
+                }
+            };
+
+            websocket.onclose = function(event) {
+                console.log('WebSocket closed');
+                updateStatus('disconnected', '❌ Disconnected');
+                connectBtn.textContent = 'Connect WebSocket';
+                connectBtn.disabled = false;
+                startRecordingBtn.disabled = true;
+                stopRecordingBtn.disabled = true;
+
+                if (isRecording) {
+                    stopRecording();
+                }
+            };
+
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateStatus('disconnected', '❌ Connection Error');
+                connectBtn.disabled = false;
+            };
+        }
+
+        async function startRecording() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                alert('Please connect to WebSocket first!');
+                return;
+            }
+
+            try {
+                // Get microphone access
+                audioStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        sampleRate: parseInt(document.getElementById('sampleRate').value),
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                // Create audio context for raw PCM processing
+                audioContext = new AudioContext({
+                    sampleRate: parseInt(document.getElementById('sampleRate').value)
+                });
+
+                const source = audioContext.createMediaStreamSource(audioStream);
+
+                // Create script processor for raw PCM data (like old server expects)
+                processor = audioContext.createScriptProcessor(parseInt(document.getElementById('chunkSize').value), 1, 1);
+
+                processor.onaudioprocess = function(event) {
+                    if (!isRecording) return;
+
+                    const inputBuffer = event.inputBuffer;
+                    const audioData = inputBuffer.getChannelData(0);  // Mono channel
+
+                    // Convert float32 to int16 PCM (like old server expects)
+                    const int16Array = new Int16Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        int16Array[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                    }
+
+                    // Get test mode and adjust chunk size accordingly
+                    const testMode = document.getElementById('testMode').value;
+                    let chunkData = new Uint8Array(int16Array.buffer);
+
+                    // Apply test mode logic for SPSC testing
+                    if (testMode === 'small') {
+                        // Force small chunks (< 16KB) to test accumulation
+                        chunkData = chunkData.slice(0, Math.min(chunkData.length, 4096)); // Max 4KB
+                    } else if (testMode === 'large') {
+                        // Create artificially large chunks (> 16KB) to test immediate processing
+                        const largeChunk = new Uint8Array(20000); // 20KB
+                        largeChunk.set(chunkData);
+                        // Fill rest with silence (zeros)
+                        chunkData = largeChunk;
+                    }
+                    // 'mixed' mode uses natural chunk size
+
+                    // Send raw PCM bytes via WebSocket (binary message)
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        websocket.send(chunkData);  // Send as binary - this is key!
+
+                        // Update metrics
+                        chunksSent++;
+                        totalBytes += chunkData.length;
+                        updateMetrics();
+
+                        // Log chunk info for SPSC debugging
+                        if (chunksSent % 10 === 0) { // Log every 10th chunk
+                            console.log(`📊 SPSC Test - Mode: ${testMode}, Chunk #${chunksSent}: ${chunkData.length} bytes ${chunkData.length > 16000 ? '(LARGE - immediate)' : '(small - accumulate)'}`);
+                        }
+
+                        // Update audio level visualization
+                        const volume = Math.sqrt(audioData.reduce((sum, val) => sum + val * val, 0) / audioData.length);
+                        audioLevel.style.width = Math.min(100, volume * 500) + '%';
+                    }
+                };
+
+                // Connect nodes
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                // Start recording
+                isRecording = true;
+                startTime = Date.now();
+                updateStatus('recording', '🔴 Recording... (sending raw PCM)');
+                startRecordingBtn.disabled = true;
+                stopRecordingBtn.disabled = false;
+
+                // Start recording timer
+                recordingTimer = setInterval(updateRecordingTime, 100);
+
+                console.log('Started recording with raw PCM streaming');
+
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                alert('Failed to start recording: ' + error.message);
+            }
+        }
+
+        function stopRecording() {
+            isRecording = false;
+
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
+
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+
+            updateStatus('connected', '✅ Connected - Stopped Recording');
+            startRecordingBtn.disabled = false;
+            stopRecordingBtn.disabled = true;
+            audioLevel.style.width = '0%';
+
+            console.log('Stopped recording');
+        }
+
+        function updateStatus(type, message) {
+            connectionStatus.className = `status ${type}`;
+            connectionStatus.textContent = message;
+        }
+
+        function updateMetrics() {
+            chunksSentDisplay.textContent = chunksSent;
+            totalBytesDisplay.textContent = (totalBytes / 1024).toFixed(1) + ' KB';
+        }
+
+        function updateRecordingTime() {
+            if (isRecording && startTime) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                recordingTimeDisplay.textContent = elapsed.toFixed(1) + 's';
+            }
+        }
+
+        function displayTranscription(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const result = `[${timestamp}] RAW: "${message.raw}"\n` +
+                          `[${timestamp}] NORMALIZED: "${message.text}"\n` +
+                          `[${timestamp}] Language: ${message.language}, Duration: ${message.duration}s\n\n`;
+
+            transcriptionOutput.textContent = result + transcriptionOutput.textContent;
+
+            // Highlight new result briefly
+            transcriptionOutput.style.backgroundColor = '#d4edda';
+            setTimeout(() => {
+                transcriptionOutput.style.backgroundColor = '#f8f9fa';
+            }, 1000);
+        }
+
+        function displayError(error) {
+            const timestamp = new Date().toLocaleTimeString();
+            const result = `[${timestamp}] ERROR: ${error}\n\n`;
+
+            transcriptionOutput.textContent = result + transcriptionOutput.textContent;
+            transcriptionOutput.style.backgroundColor = '#f8d7da';
+            setTimeout(() => {
+                transcriptionOutput.style.backgroundColor = '#f8f9fa';
+            }, 2000);
+        }
+
+        function clearTranscription() {
+            transcriptionOutput.textContent = 'Transcription results will appear here...';
+        }
+
+        // Auto-connect on page load
+        window.addEventListener('load', () => {
+            // Don't auto-connect, let user click
+            console.log('Desktop streaming test page loaded');
+        });
+    </script>
+</body>
+</html>

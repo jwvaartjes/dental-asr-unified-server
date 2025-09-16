@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚙️ Config Editor (Simple)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            overflow-x: auto;
+        }
+        .tab {
+            padding: 15px 20px;
+            cursor: pointer;
+            background: #f8f9fa;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            transition: all 0.3s;
+        }
+        .tab:hover {
+            background: #e9ecef;
+        }
+        .tab.active {
+            background: white;
+            border-bottom-color: #667eea;
+            color: #667eea;
+        }
+        .editor-container {
+            padding: 20px;
+            height: 600px;
+        }
+        .section {
+            display: none;
+        }
+        .section.active {
+            display: block;
+        }
+        .editor {
+            width: 100%;
+            height: 500px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        .actions {
+            padding: 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .status {
+            margin: 20px;
+            padding: 10px;
+            background: #e3f2fd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            color: white;
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform 0.3s;
+        }
+        .notification.show { transform: translateX(0); }
+        .notification.success { background: #28a745; }
+        .notification.error { background: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ Supabase Config Editor</h1>
+            <div class="status" id="status">Loading configuration...</div>
+        </div>
+
+        <div class="tabs" id="tabs">
+            <!-- Tabs will be created dynamically -->
+        </div>
+
+        <div class="editor-container">
+            <div id="sections">
+                <!-- Sections will be created dynamically -->
+            </div>
+        </div>
+
+        <div class="actions">
+            <div>
+                <button class="btn btn-primary" onclick="loadConfig()" id="loadBtn">🔄 Reload</button>
+                <button class="btn btn-secondary" onclick="downloadBackup()">💾 Download Backup</button>
+            </div>
+            <div>
+                <button class="btn btn-success" onclick="saveConfig()" id="saveBtn" disabled>💾 Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration sections
+        const sections = [
+            'silero_vad', 'frontend_vad', 'openai_prompt', 'default_prompt',
+            'matching', 'phonetic_patterns', 'variant_generation', 'postprocess',
+            'element_separators', 'prefixes', 'suffix_groups', 'suffix_patterns'
+        ];
+
+        let originalConfig = {};
+        let currentSection = 'silero_vad';
+
+        // Initialize the interface
+        function init() {
+            createTabs();
+            createSections();
+            loadConfig();
+        }
+
+        // Create tabs
+        function createTabs() {
+            const tabsContainer = document.getElementById('tabs');
+
+            sections.forEach((section, index) => {
+                const tab = document.createElement('div');
+                tab.className = `tab ${index === 0 ? 'active' : ''}`;
+                tab.textContent = section.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                tab.onclick = () => switchTab(section);
+                tab.setAttribute('data-section', section);
+                tabsContainer.appendChild(tab);
+            });
+        }
+
+        // Create editor sections
+        function createSections() {
+            const sectionsContainer = document.getElementById('sections');
+
+            sections.forEach((section, index) => {
+                const div = document.createElement('div');
+                div.className = `section ${index === 0 ? 'active' : ''}`;
+                div.id = `section-${section}`;
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'editor';
+                textarea.id = `editor-${section}`;
+                textarea.placeholder = `Loading ${section} configuration...`;
+                textarea.addEventListener('input', () => onConfigChange(section));
+
+                div.appendChild(textarea);
+                sectionsContainer.appendChild(div);
+            });
+        }
+
+        // Switch between tabs
+        function switchTab(section) {
+            // Update tab appearance
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-section="${section}"]`).classList.add('active');
+
+            // Update section visibility
+            document.querySelectorAll('.section').forEach(sec => {
+                sec.classList.remove('active');
+            });
+            document.getElementById(`section-${section}`).classList.add('active');
+
+            currentSection = section;
+        }
+
+        // Load configuration
+        async function loadConfig() {
+            const loadBtn = document.getElementById('loadBtn');
+            const status = document.getElementById('status');
+
+            try {
+                loadBtn.disabled = true;
+                loadBtn.textContent = '⏳ Loading...';
+                status.textContent = 'Loading configuration from Supabase...';
+
+                const response = await fetch('/api/ai/normalization/config');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                originalConfig = data.config;
+
+                // Populate editors
+                sections.forEach(section => {
+                    const editor = document.getElementById(`editor-${section}`);
+                    const value = originalConfig[section];
+
+                    if (value !== undefined) {
+                        if (typeof value === 'string') {
+                            editor.value = `"${value}"`;
+                        } else {
+                            editor.value = JSON.stringify(value, null, 2);
+                        }
+                    } else {
+                        editor.value = '{}';
+                    }
+                });
+
+                status.textContent = `✅ Loaded ${Object.keys(data.config).length} configuration sections`;
+                showNotification('Configuration loaded successfully', 'success');
+
+            } catch (error) {
+                status.textContent = `❌ Failed to load configuration: ${error.message}`;
+                showNotification(`Failed to load config: ${error.message}`, 'error');
+            } finally {
+                loadBtn.disabled = false;
+                loadBtn.textContent = '🔄 Reload';
+            }
+        }
+
+        // Save configuration
+        async function saveConfig() {
+            const saveBtn = document.getElementById('saveBtn');
+            const status = document.getElementById('status');
+
+            try {
+                saveBtn.disabled = true;
+                saveBtn.textContent = '⏳ Saving...';
+                status.textContent = 'Saving configuration to Supabase...';
+
+                // Collect all editor values
+                const configData = {};
+                let hasErrors = false;
+
+                sections.forEach(section => {
+                    const editor = document.getElementById(`editor-${section}`);
+                    const value = editor.value.trim();
+
+                    try {
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            // String value
+                            configData[section] = value.slice(1, -1);
+                        } else {
+                            // JSON value
+                            configData[section] = JSON.parse(value);
+                        }
+                    } catch (e) {
+                        hasErrors = true;
+                        showNotification(`Invalid JSON in ${section}: ${e.message}`, 'error');
+                    }
+                });
+
+                if (hasErrors) {
+                    throw new Error('Please fix JSON errors before saving');
+                }
+
+                const response = await fetch('/api/ai/config/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                originalConfig = { ...configData };
+
+                status.textContent = `✅ Saved ${result.sections_updated} configuration sections`;
+                showNotification('Configuration saved successfully!', 'success');
+
+                updateSaveButton();
+
+            } catch (error) {
+                status.textContent = `❌ Failed to save configuration: ${error.message}`;
+                showNotification(`Save failed: ${error.message}`, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = '💾 Save Changes';
+            }
+        }
+
+        // Download backup
+        async function downloadBackup() {
+            try {
+                const response = await fetch('/api/ai/config/backup');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `config-backup-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showNotification('Backup downloaded successfully', 'success');
+            } catch (error) {
+                showNotification(`Backup failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Handle config changes
+        function onConfigChange(section) {
+            updateSaveButton();
+        }
+
+        // Update save button state
+        function updateSaveButton() {
+            const saveBtn = document.getElementById('saveBtn');
+            let hasChanges = false;
+
+            sections.forEach(section => {
+                const editor = document.getElementById(`editor-${section}`);
+                const currentValue = editor.value.trim();
+                let originalValue;
+
+                if (typeof originalConfig[section] === 'string') {
+                    originalValue = `"${originalConfig[section]}"`;
+                } else {
+                    originalValue = JSON.stringify(originalConfig[section] || {}, null, 2);
+                }
+
+                if (currentValue !== originalValue) {
+                    hasChanges = true;
+                }
+            });
+
+            saveBtn.disabled = !hasChanges;
+        }
+
+        // Show notification
+        function showNotification(message, type) {
+            // Remove existing notifications
+            document.querySelectorAll('.notification').forEach(n => n.remove());
+
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => notification.classList.add('show'), 100);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

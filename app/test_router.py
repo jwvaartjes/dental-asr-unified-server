@@ -61,7 +61,7 @@ async def serve_test_page():
 async def run_normalization_test(request: TestRequest):
     """Run the normalization test and return results."""
     try:
-        # Get the pairing_server directory (where debug_simple.py is located)
+        # Get the project root directory (where run_all_normalization_tests.py is located)
         base_dir = Path(__file__).parent.parent
         
         # Path to the comprehensive test script (runs ALL tests from test_normalization.py)
@@ -74,7 +74,7 @@ async def run_normalization_test(request: TestRequest):
                 "\n".join([f.name for f in base_dir.iterdir() if f.is_file() and f.suffix == '.py'])
             )
         
-        # Run the test script
+        # Run the test script from the project root directory
         result = subprocess.run(
             ["python3", str(script_path)],
             cwd=str(base_dir),

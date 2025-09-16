@@ -5,6 +5,7 @@ Provides endpoints for transcription, provider management, and status.
 import logging
 import base64
 import io
+import json
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status
 from pydantic import BaseModel, Field
@@ -14,6 +15,7 @@ from .interfaces import TranscriptionResult, ProviderInfo, ProviderError
 from .normalization import NormalizationPipeline
 from ..pairing.security import SecurityMiddleware
 from ..data.registry import DataRegistry
+from ..utils.supabase_helper import SupabaseConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,8 @@ async def transcribe_audio(
     request_data: TranscriptionRequest,
     request: Request,
     security: SecurityMiddleware = Depends(get_security_middleware),
-    normalization_pipeline: NormalizationPipeline = Depends(get_normalization_pipeline)
+    normalization_pipeline: NormalizationPipeline = Depends(get_normalization_pipeline),
+    data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Transcribe audio data using the configured ASR provider."""
     # Validate request
@@ -126,11 +129,17 @@ async def transcribe_audio(
         audio_buffer = io.BytesIO(audio_bytes)
         audio_buffer.name = f"audio.{request_data.format}"
         
+        # Get OpenAI prompt from Supabase config (like legacy server)
+        admin_id = data_registry.loader.get_admin_id()
+        config_data = await data_registry.get_config(admin_id)
+        openai_prompt = config_data.get('openai_prompt', '') if config_data else ''
+
         # Transcribe audio
         result = await provider.transcribe(
             audio_data=audio_buffer,
             language=request_data.language,
             prompt=request_data.prompt,
+            openai_prompt=openai_prompt,  # Pass Supabase prompt
             duration=len(audio_bytes) / 32000  # Approximate duration
         )
         
@@ -181,7 +190,9 @@ async def transcribe_file(
     language: Optional[str] = "nl",
     prompt: Optional[str] = None,
     request: Request = None,
-    security: SecurityMiddleware = Depends(get_security_middleware)
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    normalization_pipeline: NormalizationPipeline = Depends(get_normalization_pipeline),
+    data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Transcribe uploaded audio file."""
     # Validate request
@@ -204,11 +215,17 @@ async def transcribe_file(
         audio_buffer = io.BytesIO(content)
         audio_buffer.name = file.filename
         
+        # Get OpenAI prompt from Supabase config (like legacy server)
+        admin_id = data_registry.loader.get_admin_id()
+        config_data = await data_registry.get_config(admin_id)
+        openai_prompt = config_data.get('openai_prompt', '') if config_data else ''
+
         # Transcribe audio
         result = await provider.transcribe(
             audio_data=audio_buffer,
             language=language,
             prompt=prompt,
+            openai_prompt=openai_prompt,  # Pass Supabase prompt
             duration=len(content) / 32000  # Approximate duration
         )
         
@@ -222,10 +239,17 @@ async def transcribe_file(
                 "id": segment.id
             })
         
+        # Apply normalization like streaming endpoint
+        raw_text, normalized_text = await apply_normalization(
+            result.text,
+            language=language or "nl",
+            pipeline=normalization_pipeline
+        )
+
         return TranscriptionResponse(
-            text=result.text,  # For file upload, keeping raw text for now
-            raw=result.text,  # Raw transcription from ASR
-            normalized=result.text,  # For file upload, keeping raw text for now
+            text=normalized_text,  # Return normalized text as main text
+            raw=raw_text,  # Raw transcription from ASR
+            normalized=normalized_text,  # Normalized transcription
             segments=segments_dict,
             language=result.language,
             duration=result.duration,
@@ -397,34 +421,217 @@ async def get_normalization_config(
 ):
     """Get complete normalization configuration from Supabase used by the pipeline."""
     await security.validate_request(request)
-    
+
     try:
         # Use admin user ID for config (same as in main.py startup)
         admin_id = data_registry.loader.get_admin_id()
-        
+
         # Get all configuration data that the normalization pipeline uses
         config = await data_registry.get_config(admin_id)
         lexicon = await data_registry.get_lexicon(admin_id)
         custom_patterns = await data_registry.get_custom_patterns(admin_id)
         protected_words = await data_registry.get_protected_words(admin_id)
-        
+
         # Get cache stats as well
         cache_stats = await data_registry.get_cache_stats()
-        
+
         return {
             "admin_user_id": admin_id,
             "config": config,
             "lexicon": lexicon,
-            "custom_patterns": custom_patterns, 
+            "custom_patterns": custom_patterns,
             "protected_words": protected_words,
             "cache_stats": cache_stats,
             "data_source": "supabase",
             "timestamp": __import__('datetime').datetime.now().isoformat()
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting normalization config: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get normalization configuration: {str(e)}"
+        )
+
+
+@router.post("/config/save")
+async def save_config(
+    config_data: Dict[str, Any],
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Save updated configuration to Supabase."""
+    await security.validate_request(request)
+
+    try:
+        # Use admin user ID for config (same as in main.py startup)
+        admin_id = data_registry.loader.get_admin_id()
+
+        # Validate that we have the required sections
+        required_sections = [
+            'silero_vad', 'frontend_vad', 'openai_prompt', 'default_prompt',
+            'matching', 'phonetic_patterns', 'variant_generation', 'postprocess',
+            'element_separators', 'prefixes', 'suffix_groups', 'suffix_patterns'
+        ]
+
+        missing_sections = [s for s in required_sections if s not in config_data]
+        if missing_sections:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required config sections: {missing_sections}"
+            )
+
+        # Use the fixed Supabase helper to save config
+        supabase_client = data_registry.loader.supabase_mgr.supabase
+        config_manager = SupabaseConfigManager(supabase_client)
+
+        success = config_manager.save_config_fixed(admin_id, config_data)
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to save configuration to database"
+            )
+
+        logger.info(f"✅ Configuration updated successfully for admin {admin_id}")
+
+        return {
+            "success": True,
+            "message": "Configuration saved successfully",
+            "sections_updated": len(config_data),
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving config: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save configuration: {str(e)}"
+        )
+
+
+@router.get("/config/backup")
+async def download_config_backup(
+    request: Request,
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Download current configuration as JSON backup."""
+    await security.validate_request(request)
+
+    try:
+        # Use admin user ID for config
+        admin_id = data_registry.loader.get_admin_id()
+
+        # Get current configuration
+        config = await data_registry.get_config(admin_id)
+
+        # Create backup with metadata
+        backup_data = {
+            "backup_info": {
+                "created_at": __import__('datetime').datetime.now().isoformat(),
+                "admin_user_id": admin_id,
+                "version": "1.0",
+                "sections_count": len(config)
+            },
+            "config": config
+        }
+
+        # Return as JSON download
+        from fastapi.responses import Response
+        import json
+
+        json_content = json.dumps(backup_data, indent=2, ensure_ascii=False)
+        filename = f"supabase-config-backup-{__import__('datetime').datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+
+        return Response(
+            content=json_content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating config backup: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create configuration backup: {str(e)}"
+        )
+
+
+@router.post("/config/restore")
+async def restore_config_backup(
+    file: UploadFile = File(...),
+    request: Request = None,
+    security: SecurityMiddleware = Depends(get_security_middleware),
+    data_registry: DataRegistry = Depends(get_data_registry)
+):
+    """Restore configuration from uploaded JSON backup."""
+    await security.validate_request(request)
+
+    try:
+        # Validate file
+        if not file.filename.endswith('.json'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File must be a JSON file"
+            )
+
+        # Read and parse file content
+        content = await file.read()
+        try:
+            backup_data = json.loads(content.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON file: {str(e)}"
+            )
+
+        # Extract config from backup
+        if 'config' in backup_data:
+            config_to_restore = backup_data['config']
+        elif isinstance(backup_data, dict) and 'backup_info' not in backup_data:
+            # Assume the entire file is the config
+            config_to_restore = backup_data
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid backup file format"
+            )
+
+        # Use admin user ID for config
+        admin_id = data_registry.loader.get_admin_id()
+
+        # Use the fixed Supabase helper to save restored config
+        supabase_client = data_registry.loader.supabase_mgr.supabase
+        config_manager = SupabaseConfigManager(supabase_client)
+
+        success = config_manager.save_config_fixed(admin_id, config_to_restore)
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to restore configuration to database"
+            )
+
+        logger.info(f"✅ Configuration restored successfully from {file.filename}")
+
+        return {
+            "success": True,
+            "message": f"Configuration restored successfully from {file.filename}",
+            "sections_restored": len(config_to_restore),
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restoring config: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to restore configuration: {str(e)}"
         )

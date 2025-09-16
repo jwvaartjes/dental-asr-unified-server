@@ -160,37 +160,99 @@ class ConnectionManager:
         return self.connection_ips.get(client_id)
 
 
+# Old PairingStore class removed - now using new interface from store.py
+
+
 class PairingService:
     """Business logic for device pairing."""
-    
+
     def __init__(self, connection_manager: ConnectionManager, store=None):
         self.manager = connection_manager
-        self.store = store  # Will be injected (InMemory or Redis)
+        # Import here to avoid circular imports
+        from .store import InMemoryPairingStore
+        self.store = store or InMemoryPairingStore()  # Use new in-memory store by default
+        # Track user sessions to ensure only one active pairing per user
+        self.user_sessions: Dict[str, Set[str]] = {}  # user_email -> {session_ids}
     
     def generate_pairing_code(self) -> str:
         """Generate a 6-digit pairing code."""
         import random
         return str(random.randint(100000, 999999))
     
-    async def initiate_pairing(self, desktop_session_id: str) -> dict:
+    async def initiate_pairing(self, desktop_session_id: str, desktop_auth_info: dict = None) -> dict:
         """Desktop initiates pairing by generating a code."""
+        from datetime import datetime, timedelta
+
+        # Clean up any existing sessions for this user before creating new pairing
+        if desktop_auth_info and desktop_auth_info.get("username"):
+            user_email = desktop_auth_info["username"]
+            await self.cleanup_user_sessions(user_email, desktop_session_id)
+
         code = self.generate_pairing_code()
-        
+        channel_id = f"pair-{code}"
+
+        # Code expires after 5 minutes
+        expires_at = datetime.utcnow() + timedelta(minutes=5)
+
         if self.store:
-            await self.store.store_pairing(code, desktop_session_id)
-        
-        logger.info(f"Generated pairing code {code} for desktop {desktop_session_id}")
-        return {"code": code, "status": "success"}
+            # Calculate TTL in seconds (5 minutes = 300 seconds)
+            ttl_seconds = 300  # 5 minutes
+            await self.store.store_pairing(code, desktop_session_id, ttl_seconds, desktop_auth_info)
+
+        logger.info(f"Generated pairing code {code} for desktop {desktop_session_id} with auth: {bool(desktop_auth_info)}, expires at {expires_at}")
+
+        return {
+            "code": code,
+            "expires_at": expires_at.isoformat() + "Z",
+            "channel_id": channel_id
+        }
     
     async def validate_pairing(self, code: str, mobile_session_id: str) -> dict:
         """Mobile validates pairing code."""
-        # In production, would check store for desktop_session_id
         channel_id = f"pair-{code}"
-        
-        logger.info(f"Mobile {mobile_session_id} validating code {code}")
-        
+
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return {
+                "success": False,
+                "error": "INVALID_CODE",
+                "message": "Invalid pairing code format"
+            }
+
+        # Check if code exists and hasn't expired
+        desktop_session_id = await self.store.get_pairing(code)
+
+        if not desktop_session_id:
+            return {
+                "success": False,
+                "error": "INVALID_CODE",
+                "message": "Pairing code does not exist or has expired"
+            }
+
+        logger.info(f"Mobile {mobile_session_id} successfully paired with code {code}")
+
         return {
             "success": True,
-            "channelId": channel_id,
-            "message": "Paired successfully"
+            "channel_id": channel_id,
+            "message": "Device paired successfully"
         }
+
+    async def cleanup_user_sessions(self, user_email: str, new_session_id: str):
+        """Cleanup old pairing sessions for a user, keeping only the newest one."""
+        if user_email not in self.user_sessions:
+            self.user_sessions[user_email] = set()
+
+        # Get existing sessions for this user
+        old_sessions = self.user_sessions[user_email].copy()
+
+        # Disconnect old sessions from their channels
+        for old_session_id in old_sessions:
+            client_info = self.manager.get_client_info(old_session_id)
+            if client_info and client_info.get("channel"):
+                old_channel = client_info["channel"]
+                logger.info(f"Cleaning up old session {old_session_id} from channel {old_channel} for user {user_email}")
+                await self.manager.disconnect(old_session_id)
+
+        # Set new session as the only active one for this user
+        self.user_sessions[user_email] = {new_session_id}
+        logger.info(f"User {user_email} now has active session: {new_session_id}")

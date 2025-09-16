@@ -1,0 +1,387 @@
+{
+  "ct2": {
+    "quant": "float16"
+  },
+  "train": {
+    "lr": 0.0001,
+    "bf16": true,
+    "fp16": false,
+    "task": "transcribe",
+    "epochs": 3,
+    "lora_r": 16,
+    "language": "nl",
+    "num_proc": 4,
+    "batch_size": 8,
+    "eval_steps": 500,
+    "grad_accum": 4,
+    "lora_alpha": 32,
+    "save_steps": 1000,
+    "lora_dropout": 0.05,
+    "warmup_ratio": 0.05,
+    "logging_steps": 50
+  },
+  "logging": {
+    "log_level": "INFO"
+  },
+  "matching": {
+    "multi_word": {
+      "overall_min": 0.75,
+      "two_word_min": 0.7,
+      "word_veto_threshold": 0.6
+    },
+    "fuzzy_threshold": 0.8,
+    "min_word_length": 3,
+    "phonetic_enabled": true,
+    "max_edit_distance": 3
+  },
+  "prefixes": [
+    "radio",
+    "peri",
+    "hetero",
+    "homo",
+    "idio",
+    "cemento",
+    "anti",
+    "pre",
+    "post",
+    "inter",
+    "intra",
+    "extra",
+    "supra",
+    "infra",
+    "sub",
+    "para",
+    "pseudo",
+    "semi"
+  ],
+  "buffering": {
+    "max_overlap": 20,
+    "min_overlap": 2,
+    "overlap_words": 5
+  },
+  "silero_vad": {
+    "positive_speech_threshold": 0.9
+  },
+  "spsc_queue": {
+    "batch_size": 10,
+    "max_queue_size": 50,
+    "enable_priority": true,
+    "batch_timeout_ms": 100,
+    "parallel_workers": 4
+  },
+  "postprocess": {
+    "remove_semicolons": true,
+    "remove_exclamations": true,
+    "remove_sentence_dots": true,
+    "remove_trailing_dots": false,
+    "remove_question_marks": true,
+    "remove_trailing_commas_eol": true,
+    "remove_trailing_word_commas": true
+  },
+  "frontend_vad": {
+    "silence_threshold": 0.01,
+    "max_chunk_duration": 8,
+    "min_chunk_duration": 1,
+    "max_silence_duration": 60,
+    "min_silence_duration": 350,
+    "chunk_overlap_percent": 10,
+    "enable_smart_chunking": true,
+    "paragraph_silence_duration": 2
+  },
+  "oversampling": {
+    "per_term": {
+      "apicaal": 4,
+      "open beet": 5,
+      "parodontaal": 3,
+      "geimpacteerd": 3,
+      "geimpacteerde": 2,
+      "gecalcificeerd": 3
+    },
+    "multi2_mult": 4,
+    "multi3_mult": 5,
+    "single_mult": 1
+  },
+  "openai_prompt": "Dit is een tandarts die een rontgenfoto beschrijft. Transcribeer exact wat gezegd is; geen toevoegingen of conclusies. Termen: distaal, distale, mesiale, mesiaal, resorptie, apex, sinus maxillaris, furcatie, cariës, laesie, radiolucentie, radio-opaciteit, botniveau, angulair, MB-radix, DB-radix, mesiobucaal, distobuccaal, palatinale, buccale, radix, radices, peri-apicale, mucosale, corticale.",
+  "suffix_groups": [
+    [
+      "aal",
+      "al"
+    ],
+    [
+      "ie",
+      "ia",
+      "y"
+    ],
+    [
+      "eus",
+      "ious"
+    ],
+    [
+      "isch",
+      "ic"
+    ],
+    [
+      "eel",
+      "al"
+    ],
+    [
+      "atie",
+      "ation"
+    ],
+    [
+      "oir",
+      "ary"
+    ]
+  ],
+  "transcription": {
+    "best_of": 8,
+    "beam_size": 15,
+    "vad_filter": true,
+    "temperature": 0,
+    "vad_parameters": {
+      "speech_pad_ms": 200,
+      "min_silence_duration_ms": 500
+    },
+    "sentence_breaks": false,
+    "word_timestamps": false,
+    "log_prob_enabled": true,
+    "log_prob_threshold": -0.7,
+    "repetition_penalty": 1.3,
+    "no_speech_threshold": 0.6,
+    "no_repeat_ngram_size": 2,
+    "no_repeat_ngram_enabled": true,
+    "compression_ratio_enabled": true,
+    "condition_on_previous_text": false,
+    "repetition_penalty_enabled": true,
+    "compression_ratio_threshold": 2
+  },
+  "user_training": {
+    "enabled": true,
+    "augmentation": {
+      "enabled": true,
+      "noise_level": 0.015,
+      "pitch_shift_range": [
+        -1,
+        1
+      ],
+      "time_stretch_range": [
+        0.9,
+        1.1
+      ]
+    },
+    "auto_training": {
+      "enabled": false,
+      "schedule": "nightly",
+      "min_new_recordings": 100
+    },
+    "min_recordings": 50,
+    "quality_threshold": 0.7,
+    "training_defaults": {
+      "lr": 5e-05,
+      "epochs": 5,
+      "lora_r": 8,
+      "batch_size": 4,
+      "eval_steps": 100,
+      "lora_alpha": 16,
+      "save_steps": 200,
+      "lora_dropout": 0.1,
+      "warmup_ratio": 0.1,
+      "logging_steps": 25
+    },
+    "recording_settings": {
+      "format": "wav",
+      "channels": 1,
+      "sample_rate": 16000,
+      "max_duration": 10,
+      "min_duration": 0.5,
+      "silence_threshold": -40
+    },
+    "priority_categories": [
+      "rx_findings",
+      "rx_anatomy",
+      "surfaces",
+      "pathology",
+      "materials",
+      "procedures"
+    ],
+    "max_recordings_per_term": 3
+  },
+  "default_prompt": "Tandarts die röntgenfoto beschrijft, termen: distaal, distale, mesiale, mesiaal, resorptie, apex, sinus maxillaris, furcatie, cariës, laesie, radiolucentie, radio-opaciteit, botniveau, angulair, MB-radix, DB-radix, mesiobucaal, distobuccaal, palatinale, buccale, radix, radices, peri-apicale, mucosale, corticale.",
+  "suffix_patterns": {
+    "noun": [
+      "ie",
+      "atie",
+      "iteit",
+      "heid"
+    ],
+    "dental": [
+      "dont",
+      "gingiv",
+      "period",
+      "endo"
+    ],
+    "medical": [
+      "osis",
+      "itis",
+      "oma",
+      "pathie"
+    ],
+    "adjective": [
+      "aal",
+      "eel",
+      "isch",
+      "air",
+      "oir"
+    ]
+  },
+  "phonetic_patterns": {
+    "dutch_sounds": {
+      "c": [
+        "k",
+        "s"
+      ],
+      "f": [
+        "v",
+        "ph"
+      ],
+      "g": [
+        "ch",
+        "x"
+      ],
+      "k": [
+        "c",
+        "ck"
+      ],
+      "s": [
+        "z"
+      ],
+      "v": [
+        "f",
+        "w"
+      ],
+      "z": [
+        "s"
+      ],
+      "aa": [
+        "a"
+      ],
+      "au": [
+        "ou",
+        "aw"
+      ],
+      "ch": [
+        "g",
+        "x",
+        "k"
+      ],
+      "dt": [
+        "t",
+        "d"
+      ],
+      "ee": [
+        "e"
+      ],
+      "ei": [
+        "ij",
+        "ai",
+        "ay"
+      ],
+      "ie": [
+        "i",
+        "y"
+      ],
+      "ij": [
+        "ei",
+        "y",
+        "ai"
+      ],
+      "ks": [
+        "x",
+        "cs"
+      ],
+      "oe": [
+        "u",
+        "o"
+      ],
+      "oo": [
+        "o"
+      ],
+      "ou": [
+        "au",
+        "ow"
+      ],
+      "uu": [
+        "u"
+      ],
+      "sch": [
+        "s",
+        "sk"
+      ]
+    },
+    "common_errors": {
+      "apeks": [
+        "apex"
+      ],
+      "karius": [
+        "cariës"
+      ],
+      "radiks": [
+        "radix"
+      ],
+      "sinaas": [
+        "sinus"
+      ],
+      "bukkaal": [
+        "buccaal"
+      ],
+      "destaal": [
+        "distaal"
+      ],
+      "meziaal": [
+        "mesiaal"
+      ],
+      "oklizaal": [
+        "occlusaal"
+      ],
+      "maxillarus": [
+        "maxillaris"
+      ],
+      "mandibularus": [
+        "mandibularis"
+      ]
+    }
+  },
+  "element_separators": [
+    "",
+    " ",
+    "-",
+    ",",
+    "."
+  ],
+  "variant_generation": {
+    "separators": [
+      "-",
+      " ",
+      ",",
+      ";",
+      "/"
+    ],
+    "digit_words": {
+      "een": "1",
+      "zes": "6",
+      "acht": "8",
+      "drie": "3",
+      "twee": "2",
+      "vier": "4",
+      "vijf": "5",
+      "zeven": "7"
+    },
+    "element_separators": [
+      "-",
+      " ",
+      ",",
+      ";",
+      "/"
+    ]
+  }
+}

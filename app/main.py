@@ -3,17 +3,20 @@ Main FastAPI application entry point.
 """
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocket, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 import os
 
 from app.deps import setup_dependencies
 from app.pairing import router, websocket_endpoint
+from app.pairing.auth_endpoints import auth_router
 from app.pairing.security import SecurityMiddleware
 from app.lexicon import router as lexicon_router
 from app.ai import ai_router
+from app.templates.router import router as templates_router
+from app.users.router import router as users_router
 from app.test_router import router as test_router
 from app.ai.normalization import NormalizationFactory
 from app.data.registry import DataRegistry
@@ -57,6 +60,13 @@ async def lifespan(app: FastAPI):
         pipeline = await NormalizationFactory.create_for_admin(data_registry)
         app.state.normalization_pipeline = pipeline
         logger.info("✅ Normalization pipeline initialized successfully")
+
+        # Initialize AI factory for streaming transcription
+        logger.info("🔄 Initializing AI factory...")
+        from app.ai.factory import ProviderFactory
+        ai_factory = ProviderFactory()
+        app.state.ai_factory = ai_factory
+        logger.info("✅ AI factory initialized successfully")
         
     except Exception as e:
         logger.warning(f"⚠️  Startup initialization failed (will continue): {e}")
@@ -103,30 +113,78 @@ def create_app(settings=None) -> FastAPI:
     app.state.http_rate_limiter = deps["http_rate_limiter"]
     app.state.connection_tracker = deps["connection_tracker"]
     app.state.data_registry = data_registry
+    app.state.template_service = deps["template_service"]
     
-    # Configure CORS with environment-specific origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.get_allowed_origins(),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    
+    # Configure CORS - conditionally enable for debugging
+    if settings.cors_enabled:
+        logger.info("CORS middleware ENABLED")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.get_allowed_origins(),
+            allow_origin_regex=r"https://.*\.lovable\.app|https://.*\.lovable\.dev|https://.*\.lovableproject\.com|https://.*\.ngrok\.app|https://.*\.ngrok\.io|https://.*\.mondplan\.com",
+            allow_credentials=True,  # Enable credentials for httpOnly cookies
+            allow_methods=["*"],
+            allow_headers=["*"],
+            max_age=3600,
+        )
+    else:
+        logger.info("CORS middleware DISABLED for development")
+
+    # Add security headers middleware for development
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security headers that allow localhost development."""
+        response = await call_next(request)
+
+        # Development-friendly CSP that allows localhost connections
+        if settings.cors_enabled or not settings.cors_enabled:  # For all environments
+            csp_policy = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; "
+                "media-src 'self' blob:; "
+                "connect-src 'self' "
+                "http://localhost:8089 https://localhost:8089 "
+                "http://127.0.0.1:8089 https://127.0.0.1:8089 "
+                "http://localhost:5173 https://localhost:5173 "
+                "ws://localhost:8089 wss://localhost:8089 "
+                "ws://127.0.0.1:8089 wss://127.0.0.1:8089 "
+                "https://*.supabase.co https://*.openai.com; "
+                "font-src 'self' data:; "
+                "object-src 'none'; "
+                "base-uri 'self'"
+            )
+            response.headers["Content-Security-Policy"] = csp_policy
+            logger.debug(f"Added CSP header for {request.url.path}")
+
+        return response
+
     # Include API routers
     app.include_router(router)
+    app.include_router(auth_router)  # Clean auth endpoints with httpOnly cookies
     app.include_router(lexicon_router)
     app.include_router(ai_router)
+    app.include_router(users_router)
+    app.include_router(templates_router)
     app.include_router(test_router)
     
     # WebSocket endpoint
     @app.websocket("/ws")
     async def websocket_route(websocket: WebSocket):
         """WebSocket endpoint handler."""
+        # Get AI factory and normalization pipeline if available
+        ai_factory = getattr(app.state, 'ai_factory', None)
+        normalization_pipeline = getattr(app.state, 'normalization_pipeline', None)
+
         await websocket_endpoint(
             websocket,
             app.state.connection_manager,
-            app.state.security_middleware
+            app.state.security_middleware,
+            app.state.template_service,
+            app.state.data_registry,
+            ai_factory=ai_factory,
+            normalization_pipeline=normalization_pipeline
         )
     
     # Health check endpoint
@@ -165,15 +223,22 @@ def create_app(settings=None) -> FastAPI:
             <p><strong>Version:</strong> 1.0.0</p>
         </div>
         <div class="links">
+            <h3>Configuration & Management:</h3>
+            <a href="/config-editor">⚙️ Supabase Config Editor (Monaco)</a>
+            <a href="/config-editor-simple">⚙️ Supabase Config Editor (Simple)</a>
+
             <h3>Test Pages:</h3>
             <a href="/api-test">🔬 Complete API Test Suite</a>
             <a href="/test-rate-limiter">🚦 Rate Limiter Test Suite</a>
             <a href="/test-normalization">🧪 Normalization Test Runner</a>
             <a href="/test-desktop.html">Desktop Test Page</a>
+            <a href="/test-desktop-streaming.html">🎤 Desktop Streaming Test</a>
             <a href="/test-mobile.html">Mobile Test Page</a>
             <a href="/test-mobile-local.html">Mobile Local Test Page</a>
-            <a href="/docs">API Documentation</a>
-            <a href="/health">Health Check</a>
+
+            <h3>Documentation:</h3>
+            <a href="/docs">📚 API Documentation</a>
+            <a href="/health">🏥 Health Check</a>
         </div>
     </div>
 </body>
@@ -212,7 +277,16 @@ def create_app(settings=None) -> FastAPI:
             with open(file_path, "r") as f:
                 return HTMLResponse(f.read())
         return HTMLResponse(f"Test page not found at {file_path}", status_code=404)
-    
+
+    @app.get("/test-desktop-streaming.html")
+    async def test_desktop_streaming():
+        """Desktop audio streaming test page based on old server logic."""
+        file_path = os.path.join(test_pages_dir, "test-desktop-streaming.html")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding='utf-8') as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse(f"Desktop streaming test page not found at {file_path}", status_code=404)
+
     @app.get("/api-test")
     async def api_test_suite():
         """Complete API test suite with ALL available endpoints on the unified server."""
@@ -230,7 +304,25 @@ def create_app(settings=None) -> FastAPI:
             with open(file_path, "r", encoding='utf-8') as f:
                 return HTMLResponse(f.read())
         return HTMLResponse("Rate limiter test page not found", status_code=404)
-    
+
+    @app.get("/config-editor")
+    async def config_editor():
+        """Supabase configuration editor with Monaco editor interface."""
+        file_path = os.path.join(test_pages_dir, "config_editor.html")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding='utf-8') as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("Config editor page not found", status_code=404)
+
+    @app.get("/config-editor-simple")
+    async def config_editor_simple():
+        """Simple Supabase configuration editor with textarea interface."""
+        file_path = os.path.join(test_pages_dir, "config_editor_simple.html")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding='utf-8') as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("Simple config editor page not found", status_code=404)
+
     return app
 
 
