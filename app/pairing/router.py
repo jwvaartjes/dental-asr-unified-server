@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from .service import ConnectionManager, PairingService
 from .security import JWTHandler, SecurityMiddleware, get_client_ip
 from .schemas import MessageValidator
-from ..ai.streaming_transcriber import StreamingTranscriber
+from ..ai.realtime_transcriber import RealtimeTranscriber
+from ..ai.blob_transcriber import BlobTranscriber
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,32 @@ def get_pairing_service(request: Request) -> PairingService:
 def get_security_middleware(request: Request) -> SecurityMiddleware:
     """Dependency to get security middleware from app state."""
     return request.app.state.security_middleware
+
+
+def _detect_wav_format(audio_message: dict) -> bool:
+    """Detect if audio message contains WAV format data."""
+    try:
+        # Try to extract data and check for RIFF header
+        data = None
+        for field in ["data", "audio_data"]:
+            if field in audio_message:
+                field_data = audio_message[field]
+                if isinstance(field_data, bytes):
+                    data = field_data
+                elif isinstance(field_data, str):
+                    try:
+                        data = base64.b64decode(field_data)
+                    except:
+                        continue
+                break
+
+        if data and len(data) >= 12:
+            return data[:4] == b'RIFF' and data[8:12] == b'WAVE'
+
+    except Exception:
+        pass
+
+    return False
 
 
 # API Endpoints
@@ -244,11 +271,24 @@ async def websocket_endpoint(
     client_id = f"client_{id(websocket)}"
     client_ip = get_client_ip(websocket=websocket)
 
-    # Initialize streaming transcriber if AI factory available
+    # Initialize transcribers if AI factory available
     streaming_transcriber = None
+    blob_transcriber = None
+    original_streaming_transcriber = None
+
     if ai_factory:
-        streaming_transcriber = StreamingTranscriber(ai_factory, normalization_pipeline)
-        logger.info(f"🚀 UPGRADED Streaming transcriber initialized for client {client_id}")
+        # Use blob transcriber for WAV blobs (file upload API quality)
+        blob_transcriber = BlobTranscriber(ai_factory, normalization_pipeline)
+        logger.info(f"🎯 Blob transcriber initialized for client {client_id} (file upload quality)")
+
+        # Use original streaming transcriber for binary PCM chunks
+        from ..ai.streaming_transcriber import StreamingTranscriber
+        original_streaming_transcriber = StreamingTranscriber(ai_factory, normalization_pipeline)
+        logger.info(f"🔄 Original streaming transcriber initialized for client {client_id} (binary PCM)")
+
+        # Keep realtime transcriber for other cases
+        streaming_transcriber = RealtimeTranscriber(ai_factory, normalization_pipeline)
+        logger.info(f"⚙️ Realtime transcriber available for client {client_id}")
     
     # Validate WebSocket connection
     is_valid, error_reason = await security_middleware.validate_websocket(websocket)
@@ -318,16 +358,18 @@ async def websocket_endpoint(
                             "timestamp": time.time()
                         }
 
-                        # Handle streaming transcription if available
-                        if streaming_transcriber:
+                        # Handle streaming transcription with original transcriber for binary PCM
+                        if original_streaming_transcriber:
                             try:
-                                transcription_triggered = await streaming_transcriber.handle_audio_chunk(
+                                transcription_triggered = await original_streaming_transcriber.handle_audio_chunk(
                                     client_id, audio_message, connection_manager
                                 )
                                 if transcription_triggered:
-                                    logger.info(f"🎯 Streaming transcription triggered for binary audio from {client_id}")
+                                    logger.info(f"🎯 Original streaming transcription triggered for binary audio from {client_id}")
                             except Exception as e:
                                 logger.error(f"Binary audio transcription error for {client_id}: {e}")
+                        else:
+                            logger.warning(f"No original streaming transcriber available for binary audio from {client_id}")
 
                         # Skip further processing for binary data
                         continue
@@ -461,16 +503,39 @@ async def websocket_endpoint(
 
                 logger.info(f"🎵 Audio message received from {client_id}: type={msg_type}, channel={channel_id}, size={message_size}B, limit={message_size_limit}B")
 
-                # Handle streaming transcription if available
-                if streaming_transcriber and msg_type in ["audio_chunk", "audio_stream"]:
+                # Handle transcription with optimal routing
+                if msg_type in ["audio_chunk", "audio_stream", "audio_data"]:
                     try:
-                        transcription_triggered = await streaming_transcriber.handle_audio_chunk(
-                            client_id, message, connection_manager
-                        )
+                        # Check if this is a WAV blob for blob transcription (file upload quality)
+                        format_field = message.get("format", "").lower()
+                        is_wav_blob = (format_field in ["wav", "wave"] or
+                                      _detect_wav_format(message))
+
+                        transcription_triggered = False
+
+                        if is_wav_blob and blob_transcriber:
+                            # Use blob transcriber for WAV (file upload API quality)
+                            logger.info(f"🎯 Using blob transcriber for WAV from {client_id}")
+                            transcription_triggered = await blob_transcriber.handle_wav_blob(
+                                client_id, message, connection_manager
+                            )
+                            # Don't use streaming transcriber for WAV blobs
+
+                        elif streaming_transcriber:
+                            # Use streaming transcriber for PCM chunks only
+                            logger.info(f"🔊 Using streaming transcriber for PCM from {client_id}")
+                            transcription_triggered = await streaming_transcriber.handle_audio_message(
+                                client_id, message, connection_manager
+                            )
+                        else:
+                            logger.warning(f"No transcriber available for {client_id}")
+
                         if transcription_triggered:
-                            logger.info(f"🎯 Streaming transcription triggered for {client_id}")
+                            method = "blob" if is_wav_blob else "streaming"
+                            logger.info(f"🎯 {method} transcription triggered for {client_id}")
+
                     except Exception as e:
-                        logger.error(f"Streaming transcription error for {client_id}: {e}")
+                        logger.error(f"Audio transcription error for {client_id}: {e}")
 
                 # Forward audio to channel (for pairing functionality)
                 if channel_id:

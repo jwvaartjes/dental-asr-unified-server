@@ -87,7 +87,10 @@ class ConnectionManager:
     async def send_personal_message(self, message: str, client_id: str):
         """Send a message to a specific client."""
         if client_id in self.active_connections:
-            await self.active_connections[client_id].send_text(message)
+            try:
+                await self.active_connections[client_id].send_text(message)
+            except Exception as e:
+                logger.error(f"Failed to send personal message to {client_id}: {e}")
 
     async def join_channel(self, client_id: str, channel_id: str, device_type: str):
         """Add a client to a channel."""
@@ -116,20 +119,44 @@ class ConnectionManager:
     async def broadcast_to_channel(self, channel_id: str, message: dict, exclude: Optional[str] = None):
         """Broadcast a message to all clients in a channel."""
         import json
+        from datetime import datetime
+
         if channel_id in self.channels:
             logger.debug(f"Broadcasting to channel {channel_id}: {message['type']}")
             logger.debug(f"Channel members: {list(self.channels[channel_id])}")
             logger.debug(f"Active connections: {list(self.active_connections.keys())}")
             logger.debug(f"Excluding: {exclude}")
-            
+
+            # Convert datetime objects to ISO strings for JSON serialization
+            serializable_message = self._make_json_serializable(message)
+
             for client_id in self.channels[channel_id]:
                 if client_id != exclude and client_id in self.active_connections:
                     logger.debug(f"Sending {message['type']} to {client_id}")
-                    await self.active_connections[client_id].send_text(json.dumps(message))
+                    try:
+                        await self.active_connections[client_id].send_text(json.dumps(serializable_message))
+                    except Exception as e:
+                        logger.error(f"Failed to send message to {client_id}: {e}")
                 else:
                     logger.debug(f"Skipping {client_id}: excluded={client_id == exclude}, active={client_id in self.active_connections}")
         else:
             logger.warning(f"Channel {channel_id} not found for broadcasting")
+
+    def _make_json_serializable(self, obj):
+        """
+        Convert objects to JSON-serializable format.
+        Handles datetime objects and nested structures.
+        """
+        from datetime import datetime
+
+        if isinstance(obj, dict):
+            return {key: self._make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        else:
+            return obj
 
     async def _check_pairing_complete(self, channel_id: str):
         """Check if both desktop and mobile are in channel and notify success."""

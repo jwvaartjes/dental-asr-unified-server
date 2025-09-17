@@ -45,6 +45,8 @@ class ProviderFactory:
             # Create provider based on type
             if config.provider_type == 'openai':
                 provider = await self._create_openai_asr_provider(config)
+            elif config.provider_type == 'openai_realtime':
+                provider = await self._create_openai_realtime_provider(config)
             elif config.provider_type == 'whisper':
                 provider = await self._create_whisper_provider(config)
             elif config.provider_type == 'azure_openai':
@@ -81,7 +83,26 @@ class ProviderFactory:
                 f"OpenAI provider dependencies not available: {e}",
                 provider_name="openai"
             )
-    
+
+    async def _create_openai_realtime_provider(self, config: ProviderConfig) -> ASRProvider:
+        """Create OpenAI Realtime ASR provider."""
+        try:
+            from .providers.openai_realtime_provider import OpenAIRealtimeProvider
+            # Extract API key and model from config
+            api_key = config.config.get('api_key')
+            model = config.model_name or "gpt-4o-realtime-preview-2024-12-17"
+            return OpenAIRealtimeProvider(api_key=api_key, model=model)
+        except ImportError as e:
+            raise ProviderInitializationError(
+                f"OpenAI Realtime provider dependencies not available: {e}",
+                provider_name="openai_realtime"
+            )
+        except Exception as e:
+            raise ProviderInitializationError(
+                f"OpenAI Realtime provider creation failed: {e}",
+                provider_name="openai_realtime"
+            )
+
     async def _create_whisper_provider(self, config: ProviderConfig) -> ASRProvider:
         """Create local Whisper provider."""
         try:

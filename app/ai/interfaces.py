@@ -18,6 +18,7 @@ class ProviderType(Enum):
 
 class ProviderStatus(Enum):
     """Provider status states."""
+    NOT_INITIALIZED = "not_initialized"
     INITIALIZING = "initializing"
     READY = "ready"
     ERROR = "error"

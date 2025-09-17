@@ -159,6 +159,67 @@ class AudioBuffer:
             logger.error(f"Failed to create WAV data: {e}")
             return None
 
+    def combine_wav_chunks(self, wav_chunks: List[bytes]) -> Optional[bytes]:
+        """
+        Combine multiple WAV chunks into single WAV file with correct headers.
+        No PCM conversion needed - direct WAV concatenation.
+        """
+        if not wav_chunks:
+            return None
+
+        try:
+            # If we have a single WAV chunk, return it directly
+            if len(wav_chunks) == 1:
+                logger.debug(f"✅ Single WAV chunk: {len(wav_chunks[0])} bytes")
+                return wav_chunks[0]
+
+            # For multiple WAV chunks, extract PCM data and combine
+            combined_pcm = bytearray()
+            sample_rate = self.sample_rate
+            channels = self.channels
+            sample_width = self.sample_width
+
+            for i, wav_chunk in enumerate(wav_chunks):
+                try:
+                    # Read WAV chunk and extract PCM data
+                    wav_buffer = io.BytesIO(wav_chunk)
+                    with wave.open(wav_buffer, 'rb') as wav_file:
+                        # Verify format consistency
+                        if wav_file.getframerate() != sample_rate:
+                            logger.warning(f"Inconsistent sample rate in chunk {i}: {wav_file.getframerate()} vs {sample_rate}")
+
+                        # Extract PCM frames
+                        pcm_frames = wav_file.readframes(wav_file.getnframes())
+                        combined_pcm.extend(pcm_frames)
+
+                        logger.debug(f"Extracted {len(pcm_frames)} bytes PCM from WAV chunk {i}")
+
+                except Exception as e:
+                    logger.warning(f"Failed to process WAV chunk {i}: {e}")
+                    continue
+
+            if not combined_pcm:
+                logger.error("No valid PCM data found in WAV chunks")
+                return None
+
+            # Create final WAV with combined PCM data
+            final_wav_buffer = io.BytesIO()
+            with wave.open(final_wav_buffer, 'wb') as final_wav:
+                final_wav.setnchannels(channels)
+                final_wav.setsampwidth(sample_width)
+                final_wav.setframerate(sample_rate)
+                final_wav.writeframes(combined_pcm)
+
+            final_wav_data = final_wav_buffer.getvalue()
+            duration_ms = (len(combined_pcm) / (sample_rate * sample_width)) * 1000
+
+            logger.info(f"✅ Combined {len(wav_chunks)} WAV chunks into {len(final_wav_data)} bytes ({duration_ms:.0f}ms)")
+            return final_wav_data
+
+        except Exception as e:
+            logger.error(f"Failed to combine WAV chunks: {e}")
+            return None
+
     def force_flush(self) -> Optional[bytes]:
         """Force flush any pending audio (for connection close, etc.)"""
         if self.pending_audio:
