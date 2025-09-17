@@ -233,28 +233,10 @@ async def pair_device(
 
 
 async def get_message_size_limit_for_user(template_service, admin_user_id: str) -> int:
-    """Get WebSocket message size limit based on active template type."""
-    try:
-        # Get the active template for the admin user
-        active_template = await template_service.get_active_template(admin_user_id)
-
-        if active_template:
-            template_type = active_template.get("template_type", "general")
-
-            # Template-based size limits
-            if template_type in ["quick-check", "brief-exam", "short"]:
-                return 100 * 1024  # 100KB for short examinations
-            elif template_type in ["full-consultation", "comprehensive", "long"]:
-                return 25 * 1024   # 25KB for long consultations (use chunking)
-            else:
-                return 50 * 1024   # 50KB for general templates (default)
-
-        # Fallback to default limit
-        return 1024 * 1024  # 1MB default for audio chunks
-
-    except Exception as e:
-        logger.warning(f"Failed to get template-based size limit: {e}")
-        return 1024 * 1024  # Fallback to 1MB for audio chunks
+    """Get WebSocket message size limit - prioritize audio functionality."""
+    # Always use 1MB for audio to ensure transcription works
+    # Template-based limits can be implemented later if needed
+    return 1024 * 1024  # 1MB for all WebSocket messages (audio priority)
 
 
 # WebSocket endpoint (separate from APIRouter)
@@ -444,6 +426,9 @@ async def websocket_endpoint(
             
             logger.info(f"📨 Received from {client_id}: {message.get('type')} (data size: {len(data)} bytes)")
 
+            # Update activity tracking for timeout management
+            connection_manager.update_activity(client_id)
+
             # Handle different message types
             msg_type = message.get("type")
             
@@ -470,7 +455,22 @@ async def websocket_endpoint(
                     
             elif msg_type == "identify":
                 device_type = message.get("device_type", "desktop")
-                connection_manager.client_info[client_id] = {"device_type": device_type}
+                session_id = message.get("session_id", "unknown")
+
+                # Enhanced device identification with session tracking
+                import time
+                connection_manager.client_info[client_id] = {
+                    "device_type": device_type,
+                    "session_id": session_id,
+                    "identified": True,
+                    "identification_time": time.time()
+                }
+
+                # Update activity on identification
+                connection_manager.update_activity(client_id)
+
+                logger.info(f"✅ Client {client_id} identified as {device_type} (session: {session_id})")
+
                 await connection_manager.send_personal_message(
                     json.dumps({"type": "identified", "device_type": device_type}),
                     client_id

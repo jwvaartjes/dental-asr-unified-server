@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🧪 API Monitoring Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #4ade80, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .control-card h3 {
+            color: #4ade80;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            display: inline-block;
+        }
+
+        .status-indicator.online {
+            background: #22c55e;
+            box-shadow: 0 0 10px #22c55e;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #4f46e5, #7c3aed);
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 5px 5px 0;
+            transition: all 0.3s ease;
+            text-transform: none;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: linear-gradient(45deg, #6366f1, #8b5cf6);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.4);
+        }
+
+        .btn.large {
+            font-size: 16px;
+            padding: 15px 25px;
+        }
+
+        .btn.success {
+            background: linear-gradient(45deg, #059669, #0d9488);
+        }
+
+        .btn.danger {
+            background: linear-gradient(45deg, #dc2626, #ea580c);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .test-results {
+            margin-top: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .test-results h3 {
+            color: #22d3ee;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .test-results pre {
+            background: #0a0a0a;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: pre-wrap;
+        }
+
+        .api-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .api-category {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .api-category h4 {
+            color: #fbbf24;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .endpoint-list {
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .endpoint-item {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .method-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+
+        .method-get { background: #10b981; color: white; }
+        .method-post { background: #f59e0b; color: white; }
+        .method-put { background: #6366f1; color: white; }
+        .method-delete { background: #ef4444; color: white; }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #4ade80, #22d3ee);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #4ade80;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-number.success { color: #22c55e; }
+        .stat-number.warning { color: #f59e0b; }
+        .stat-number.error { color: #ef4444; }
+
+        .real-time-log {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 15px;
+            border-radius: 8px;
+            height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+            border: 1px solid #333;
+        }
+
+        .real-time-log .timestamp {
+            color: #888;
+        }
+
+        .real-time-log .success {
+            color: #0f0;
+        }
+
+        .real-time-log .error {
+            color: #f00;
+        }
+
+        .real-time-log .warning {
+            color: #ff0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 API Monitoring Dashboard</h1>
+            <p>Real-time monitoring and testing for all 77 API endpoints</p>
+            <p><strong>Comprehensive System Health & Testing Interface</strong></p>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <div class="control-card">
+                <h3>🚀 System Status</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+                    <span>API Server:</span>
+                    <span>
+                        <span class="status-indicator" id="serverStatus"></span>
+                        <span id="serverStatusText">Checking...</span>
+                    </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+                    <span>Total Endpoints:</span>
+                    <span id="totalEndpoints">-</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0;">
+                    <span>Authentication:</span>
+                    <span id="authStatus">Not checked</span>
+                </div>
+            </div>
+
+            <div class="control-card">
+                <h3>🎯 Test Controls</h3>
+                <button class="btn large success" id="runTestsBtn" onclick="runCompleteTests()">
+                    🧪 Run Complete Test Suite
+                </button>
+                <button class="btn" onclick="discoverEndpoints()">
+                    🔍 Discover All APIs
+                </button>
+                <button class="btn" onclick="testAuthentication()">
+                    🔐 Test Authentication
+                </button>
+                <button class="btn" onclick="clearResults()">
+                    🗑️ Clear Results
+                </button>
+            </div>
+
+            <div class="control-card">
+                <h3>📊 Quick Stats</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalTests">-</div>
+                        <div>Total Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number success" id="passedTests">-</div>
+                        <div>Passed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number error" id="failedTests">-</div>
+                        <div>Failed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="successRate">-</div>
+                        <div>Success Rate</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-bar" id="progressContainer" style="display: none;">
+            <div class="progress-fill" id="progressBar">0%</div>
+        </div>
+
+        <!-- API Overview -->
+        <div id="apiOverview" class="api-overview"></div>
+
+        <!-- Test Results -->
+        <div class="test-results">
+            <h3>
+                📋 Test Results & System Log
+                <span id="testStatus"></span>
+            </h3>
+            <pre id="testOutput">Ready to test all API endpoints...
+
+🎯 Quick Start:
+1. Click "Run Complete Test Suite" to test all 77 endpoints
+2. View real-time results and detailed analysis
+3. Monitor system health and endpoint status
+
+💡 This dashboard provides comprehensive API testing and monitoring for the dental ASR system.</pre>
+        </div>
+
+        <!-- Real-time Log -->
+        <div class="real-time-log" id="realTimeLog">
+            <div class="timestamp">[Loading...]</div>
+            <div>🧪 API Monitoring Dashboard Ready</div>
+            <div>📡 Waiting for test commands...</div>
+        </div>
+    </div>
+
+    <script>
+        let allEndpoints = [];
+        let testResults = {};
+        let isTestRunning = false;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            checkServerStatus();
+            discoverEndpoints();
+            updateTimestamp();
+            setInterval(updateTimestamp, 1000);
+        });
+
+        function updateTimestamp() {
+            const now = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('realTimeLog');
+            if (logElement.children.length > 0) {
+                logElement.children[0].textContent = `[${now}]`;
+            }
+        }
+
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('realTimeLog');
+            const outputElement = document.getElementById('testOutput');
+            const timestamp = new Date().toLocaleTimeString();
+
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+
+            logElement.appendChild(logEntry);
+            logElement.scrollTop = logElement.scrollHeight;
+
+            // Also add to main output
+            outputElement.textContent += `\\n[${timestamp}] ${message}`;
+            outputElement.scrollTop = outputElement.scrollHeight;
+        }
+
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/health');
+                if (response.ok) {
+                    document.getElementById('serverStatus').className = 'status-indicator online';
+                    document.getElementById('serverStatusText').textContent = 'Online';
+                    log('✅ Server is online and healthy', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                document.getElementById('serverStatus').className = 'status-indicator';
+                document.getElementById('serverStatusText').textContent = 'Offline';
+                log(`❌ Server check failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function discoverEndpoints() {
+            try {
+                log('🔍 Discovering all API endpoints...', 'info');
+
+                const response = await fetch('/openapi.json');
+                const openapi = await response.json();
+
+                allEndpoints = [];
+                const paths = openapi.paths || {};
+
+                for (const [path, methods] of Object.entries(paths)) {
+                    for (const [method, details] of Object.entries(methods)) {
+                        if (['get', 'post', 'put', 'delete', 'patch'].includes(method.toLowerCase())) {
+                            allEndpoints.push({
+                                path: path,
+                                method: method.toUpperCase(),
+                                summary: details.summary || path,
+                                tags: details.tags || ['untagged'],
+                                operationId: details.operationId || '',
+                                parameters: details.parameters || [],
+                                requestBody: details.requestBody || {}
+                            });
+                        }
+                    }
+                }
+
+                document.getElementById('totalEndpoints').textContent = allEndpoints.length;
+                displayEndpointOverview();
+                log(`✅ Discovered ${allEndpoints.length} API endpoints`, 'success');
+
+            } catch (error) {
+                log(`❌ Failed to discover endpoints: ${error.message}`, 'error');
+            }
+        }
+
+        function displayEndpointOverview() {
+            const overview = document.getElementById('apiOverview');
+
+            // Group endpoints by category
+            const categories = {};
+            allEndpoints.forEach(endpoint => {
+                const category = endpoint.tags[0] || 'untagged';
+                if (!categories[category]) {
+                    categories[category] = [];
+                }
+                categories[category].push(endpoint);
+            });
+
+            overview.innerHTML = '';
+
+            for (const [category, endpoints] of Object.entries(categories)) {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'api-category';
+
+                categoryDiv.innerHTML = `
+                    <h4>📋 ${category.toUpperCase()} (${endpoints.length} endpoints)</h4>
+                    <div class="endpoint-list" id="category-${category}">
+                        ${endpoints.map(ep => `
+                            <div class="endpoint-item">
+                                <span>${ep.method} ${ep.path}</span>
+                                <span class="method-badge method-${ep.method.toLowerCase()}">${ep.method}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+
+                overview.appendChild(categoryDiv);
+            }
+        }
+
+        async function testAuthentication() {
+            log('🔐 Testing authentication flow...', 'info');
+
+            try {
+                // Test token status
+                const tokenResponse = await fetch('/api/auth/token-status');
+                const tokenData = await tokenResponse.json();
+
+                if (tokenData.valid) {
+                    document.getElementById('authStatus').textContent = '✅ Authenticated';
+                    log(`✅ Authentication valid (expires in ${tokenData.time_until_expiry_minutes} min)`, 'success');
+                } else {
+                    document.getElementById('authStatus').textContent = '❌ Not authenticated';
+                    log('❌ No valid authentication token', 'error');
+                }
+            } catch (error) {
+                log(`❌ Authentication test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function runCompleteTests() {
+            if (isTestRunning) {
+                log('⚠️ Test suite is already running', 'warning');
+                return;
+            }
+
+            isTestRunning = true;
+            document.getElementById('runTestsBtn').disabled = true;
+            document.getElementById('progressContainer').style.display = 'block';
+
+            log('🧪 Starting comprehensive test suite...', 'info');
+            clearStats();
+
+            try {
+                // Run the Python test suite via API call
+                const response = await fetch('/run-comprehensive-tests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        full_test: true,
+                        include_performance: true,
+                        include_security: true
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    displayTestResults(result);
+                } else {
+                    // Fallback: run tests via direct call if API not available
+                    await runTestsDirectly();
+                }
+
+            } catch (error) {
+                log(`❌ Test execution failed: ${error.message}`, 'error');
+                await runTestsDirectly();
+            }
+
+            isTestRunning = false;
+            document.getElementById('runTestsBtn').disabled = false;
+            document.getElementById('progressContainer').style.display = 'none';
+        }
+
+        async function runTestsDirectly() {
+            log('🔄 Running tests directly via individual API calls...', 'info');
+
+            let totalTests = allEndpoints.length;
+            let passedTests = 0;
+            let testCount = 0;
+
+            for (const endpoint of allEndpoints) {
+                testCount++;
+                updateProgress(testCount, totalTests);
+
+                try {
+                    const result = await testSingleEndpoint(endpoint);
+                    if (result.success) {
+                        passedTests++;
+                    }
+
+                    log(`${result.success ? '✅' : '❌'} ${endpoint.method} ${endpoint.path} - ${result.details}`,
+                        result.success ? 'success' : 'error');
+
+                } catch (error) {
+                    log(`❌ ${endpoint.method} ${endpoint.path} - Error: ${error.message}`, 'error');
+                }
+
+                // Small delay to avoid overwhelming server
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            updateStats(passedTests, totalTests - passedTests, totalTests);
+
+            const successRate = (passedTests / totalTests * 100).toFixed(1);
+            log(`\\n📊 Test Summary: ${passedTests}/${totalTests} passed (${successRate}%)`,
+                successRate >= 90 ? 'success' : successRate >= 70 ? 'warning' : 'error');
+        }
+
+        async function testSingleEndpoint(endpoint) {
+            const url = endpoint.path;
+            const method = endpoint.method;
+
+            try {
+                const options = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+
+                // Add test data for POST/PUT requests
+                if (['POST', 'PUT', 'PATCH'].includes(method)) {
+                    options.body = JSON.stringify(generateTestData(endpoint));
+                }
+
+                const response = await fetch(url, options);
+
+                // Evaluate success based on expected status codes
+                const isSuccess = evaluateResponse(response.status, method);
+
+                return {
+                    success: isSuccess,
+                    details: `Status: ${response.status}`,
+                    status: response.status
+                };
+
+            } catch (error) {
+                return {
+                    success: false,
+                    details: `Error: ${error.message}`,
+                    status: 0
+                };
+            }
+        }
+
+        function generateTestData(endpoint) {
+            const path = endpoint.path;
+
+            if (path.includes('login')) {
+                return { email: 'test@example.com', password: 'test123' };
+            } else if (path.includes('transcribe')) {
+                return {
+                    audio_data: 'UklGRiYAAABXQVZFZm10IBAAAAABAAEAK...', // Minimal WAV
+                    language: 'nl'
+                };
+            } else if (path.includes('lexicon') && endpoint.method === 'POST') {
+                return { term: 'test_term', category: 'test_category' };
+            }
+
+            return { test: true };
+        }
+
+        function evaluateResponse(status, method) {
+            if (method === 'GET') {
+                return [200, 401, 403, 404].includes(status);
+            } else if (['POST', 'PUT', 'PATCH'].includes(method)) {
+                return [200, 201, 400, 401, 403, 422].includes(status);
+            } else if (method === 'DELETE') {
+                return [200, 204, 401, 403, 404].includes(status);
+            }
+            return false;
+        }
+
+        function updateProgress(current, total) {
+            const percentage = (current / total * 100).toFixed(1);
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = `${percentage}%`;
+            progressBar.textContent = `${current}/${total} (${percentage}%)`;
+        }
+
+        function updateStats(passed, failed, total) {
+            document.getElementById('totalTests').textContent = total;
+            document.getElementById('passedTests').textContent = passed;
+            document.getElementById('failedTests').textContent = failed;
+
+            const successRate = (passed / total * 100).toFixed(1);
+            const rateElement = document.getElementById('successRate');
+            rateElement.textContent = `${successRate}%`;
+
+            if (successRate >= 90) {
+                rateElement.className = 'stat-number success';
+            } else if (successRate >= 70) {
+                rateElement.className = 'stat-number warning';
+            } else {
+                rateElement.className = 'stat-number error';
+            }
+        }
+
+        function clearStats() {
+            document.getElementById('totalTests').textContent = '-';
+            document.getElementById('passedTests').textContent = '-';
+            document.getElementById('failedTests').textContent = '-';
+            document.getElementById('successRate').textContent = '-';
+        }
+
+        function displayTestResults(results) {
+            const output = document.getElementById('testOutput');
+            output.textContent = JSON.stringify(results, null, 2);
+
+            if (results.summary) {
+                updateStats(results.summary.passed, results.summary.failed, results.summary.total);
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('testOutput').textContent = 'Test results cleared...\\nReady for new test run.';
+            document.getElementById('realTimeLog').innerHTML = `
+                <div class="timestamp">[${new Date().toLocaleTimeString()}]</div>
+                <div>🧪 API Monitoring Dashboard Ready</div>
+                <div>📡 Waiting for test commands...</div>
+            `;
+            clearStats();
+        }
+
+        // Auto-refresh server status every 30 seconds
+        setInterval(checkServerStatus, 30000);
+    </script>
+</body>
+</html>

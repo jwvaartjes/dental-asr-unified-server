@@ -16,11 +16,21 @@ class ConnectionManager:
         self.channels: Dict[str, Set[str]] = {}
         self.client_info: Dict[str, dict] = {}
         self.connection_ips: Dict[str, str] = {}
+        
+        # Connection activity tracking for timeout management
+        self.last_activity: Dict[str, float] = {}
+        self.connection_start_time: Dict[str, float] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str, client_ip: str = None):
         """Accept and register a new WebSocket connection."""
+        import time
         await websocket.accept()
+        current_time = time.time()
+        
         self.active_connections[client_id] = websocket
+        self.last_activity[client_id] = current_time
+        self.connection_start_time[client_id] = current_time
+        
         if client_ip:
             self.connection_ips[client_id] = client_ip
         logger.info(f"Client {client_id} connected from {client_ip}")
@@ -53,6 +63,12 @@ class ConnectionManager:
         # Clean up IP tracking
         if client_id in self.connection_ips:
             del self.connection_ips[client_id]
+            
+        # Clean up activity tracking
+        if client_id in self.last_activity:
+            del self.last_activity[client_id]
+        if client_id in self.connection_start_time:
+            del self.connection_start_time[client_id]
             
         logger.info(f"Client {client_id} disconnected")
 
@@ -157,6 +173,12 @@ class ConnectionManager:
             return obj.isoformat()
         else:
             return obj
+
+    def update_activity(self, client_id: str):
+        """Update last activity time for a client."""
+        import time
+        if client_id in self.active_connections:
+            self.last_activity[client_id] = time.time()
 
     async def _check_pairing_complete(self, channel_id: str):
         """Check if both desktop and mobile are in channel and notify success."""

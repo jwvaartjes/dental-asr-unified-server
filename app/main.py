@@ -323,6 +323,78 @@ def create_app(settings=None) -> FastAPI:
                 return HTMLResponse(f.read())
         return HTMLResponse("Simple config editor page not found", status_code=404)
 
+    @app.get("/api-monitoring")
+    async def api_monitoring_dashboard():
+        """API monitoring dashboard with comprehensive test suite."""
+        file_path = os.path.join(test_pages_dir, "api_monitoring_dashboard.html")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding='utf-8') as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("API monitoring dashboard not found", status_code=404)
+
+    @app.post("/run-comprehensive-tests")
+    async def run_comprehensive_tests(request: Request):
+        """Run comprehensive test suite and return results."""
+        import subprocess
+        import asyncio
+        
+        try:
+            # Run the Python test suite
+            result = subprocess.run([
+                'python3', 'debug/complete_api_test_suite.py'
+            ], capture_output=True, text=True, timeout=120)
+            
+            # Parse output for structured results
+            output_lines = result.stdout.split('\n')
+            
+            # Extract key metrics
+            summary = {
+                "total": 0,
+                "passed": 0, 
+                "failed": 0,
+                "success_rate": 0,
+                "status": "unknown"
+            }
+            
+            for line in output_lines:
+                if "Total Tests:" in line:
+                    summary["total"] = int(line.split("Total Tests:")[1].strip())
+                elif "Passed:" in line:
+                    summary["passed"] = int(line.split("Passed:")[1].strip())
+                elif "Failed:" in line:
+                    summary["failed"] = int(line.split("Failed:")[1].strip())
+                elif "Success Rate:" in line:
+                    rate_str = line.split("Success Rate:")[1].strip().replace('%', '')
+                    summary["success_rate"] = float(rate_str)
+                elif "EXCELLENT" in line:
+                    summary["status"] = "excellent"
+                elif "CRITICAL" in line:
+                    summary["status"] = "critical"
+                elif "GOOD" in line:
+                    summary["status"] = "good"
+            
+            return {
+                "success": result.returncode == 0,
+                "summary": summary,
+                "full_output": result.stdout,
+                "errors": result.stderr,
+                "timestamp": datetime.now().isoformat(),
+                "total_endpoints": len(allEndpoints) if 'allEndpoints' in globals() else summary["total"]
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": "Test suite timed out after 120 seconds",
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+
     return app
 
 

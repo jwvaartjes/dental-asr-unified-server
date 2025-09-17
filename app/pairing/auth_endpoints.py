@@ -1,6 +1,7 @@
 """
 Clean auth endpoints with httpOnly cookies - no fallbacks.
 """
+import json
 import logging
 from fastapi import APIRouter, Request, Response, Depends, HTTPException, status
 from .security import SecurityMiddleware
@@ -30,7 +31,13 @@ async def login(
         # Import here to avoid circular imports
         from app.users.auth import user_auth
 
-        data = await request.json()
+        # Handle JSON parsing explicitly
+        try:
+            data = await request.json()
+        except (ValueError, json.JSONDecodeError) as e:
+            logger.warning(f"Malformed JSON in login request: {e}")
+            raise HTTPException(status_code=400, detail="Invalid JSON format")
+
         email = data.get("email", data.get("username", ""))
         password = data.get("password", "")
 
@@ -72,10 +79,11 @@ async def login(
                 response, token, user_data, request
             )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (400, 401, etc.)
+        raise
     except Exception as e:
         logger.error(f"Login error: {e}")
-        if isinstance(e, HTTPException):
-            raise e
         raise HTTPException(status_code=500, detail="Login failed")
 
 
@@ -174,6 +182,73 @@ async def auth_status(current_user: dict = RequireAuth):
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail="Failed to get user status")
+
+@auth_router.get("/token-status")
+async def token_status(request: Request):
+    """Check token validity and expiration status."""
+    from datetime import datetime
+    from ..pairing.security import JWTHandler
+    
+    try:
+        # Try to get token from different sources
+        token = None
+        
+        # First try Authorization header
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+        
+        # Fallback: try httpOnly cookie
+        if not token:
+            token = request.cookies.get("session_token")
+        
+        # No token found
+        if not token:
+            return {
+                "valid": False,
+                "expired": False,
+                "reason": "no_token",
+                "action_required": "login"
+            }
+        
+        # Verify token
+        payload = JWTHandler.verify_token(token)
+        if not payload:
+            return {
+                "valid": False,
+                "expired": True,
+                "reason": "token_expired",
+                "action_required": "logout"
+            }
+        
+        # Token is valid - calculate expiration info
+        exp_timestamp = payload.get("exp", 0)
+        current_timestamp = datetime.utcnow().timestamp()
+        time_until_expiry = exp_timestamp - current_timestamp
+        
+        # Check if token expires soon (30 minutes = 1800 seconds)
+        should_refresh_soon = time_until_expiry < 1800
+        
+        return {
+            "valid": True,
+            "expired": False,
+            "authenticated": True,
+            "expires_at": datetime.fromtimestamp(exp_timestamp).isoformat() + "Z",
+            "time_until_expiry_seconds": int(time_until_expiry),
+            "time_until_expiry_minutes": int(time_until_expiry / 60),
+            "should_refresh_soon": should_refresh_soon,
+            "action_required": "none"
+        }
+        
+    except Exception as e:
+        logger.error(f"Token status check error: {e}")
+        return {
+            "valid": False,
+            "expired": True,
+            "reason": "token_validation_error",
+            "action_required": "logout",
+            "error": str(e)
+        }
 
 
 @auth_router.post("/logout")

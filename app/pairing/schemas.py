@@ -91,11 +91,11 @@ class AudioChunkMessage(BaseWSMessage):
     """Audio chunk for streaming."""
     type: Literal['audio_chunk', 'audio_data', 'audio_stream']
     chunk_id: Optional[str] = Field(None, max_length=50)
-    data: str = Field(..., max_length=1048576)  # Base64 encoded, ~1MB
+    audio_data: str = Field(..., max_length=1048576)  # Base64 encoded, ~1MB
     format: Optional[Literal['wav', 'mp3', 'webm', 'opus']] = 'webm'
     sample_rate: Optional[int] = Field(None, ge=8000, le=48000)
     
-    @validator('data')
+    @validator('audio_data')
     def validate_base64(cls, v):
         """Validate base64 encoding."""
         import base64
