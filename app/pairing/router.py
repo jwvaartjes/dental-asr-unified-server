@@ -328,9 +328,16 @@ async def websocket_endpoint(
                         is_binary = False
                         logger.debug(f"📝 Received text message from {client_id}: {len(data)} chars")
                     elif "bytes" in message:
-                        # Handle binary audio data
+                        # Handle binary audio data with channel-aware routing
                         binary_data = message["bytes"]
                         logger.info(f"🎵 Received binary audio from {client_id}: {len(binary_data)} bytes")
+
+                        # Get client info for channel-aware transcription routing
+                        client_info = connection_manager.client_info.get(client_id, {})
+                        channel_id = client_info.get("channel")
+                        device_type = client_info.get("device_type", "unknown")
+
+                        logger.info(f"🔍 Binary audio routing: device={device_type}, channel={channel_id}")
 
                         # Create audio message for streaming transcriber
                         audio_message = {
@@ -340,14 +347,19 @@ async def websocket_endpoint(
                             "timestamp": time.time()
                         }
 
-                        # Handle streaming transcription with original transcriber for binary PCM
+                        # Handle streaming transcription with channel-aware routing
                         if original_streaming_transcriber:
                             try:
                                 transcription_triggered = await original_streaming_transcriber.handle_audio_chunk(
-                                    client_id, audio_message, connection_manager
+                                    client_id,
+                                    audio_message,
+                                    connection_manager,
+                                    target_channel=channel_id,
+                                    sender_device_type=device_type
                                 )
                                 if transcription_triggered:
-                                    logger.info(f"🎯 Original streaming transcription triggered for binary audio from {client_id}")
+                                    route_info = f"channel={channel_id}" if channel_id else "standalone"
+                                    logger.info(f"🎯 Binary audio transcription triggered: {device_type} → {route_info}")
                             except Exception as e:
                                 logger.error(f"Binary audio transcription error for {client_id}: {e}")
                         else:

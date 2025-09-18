@@ -277,13 +277,23 @@ class MobilePairingCompleteTest:
                 }
                 await desktop_ws.send(json.dumps(desktop_identify))
 
-                # Wait for desktop identification
-                desktop_response = await asyncio.wait_for(desktop_ws.recv(), timeout=5.0)
-                desktop_data = json.loads(desktop_response)
+                # Wait for desktop identification (check multiple messages)
+                identified = False
+                for _ in range(3):  # Check up to 3 messages
+                    try:
+                        desktop_response = await asyncio.wait_for(desktop_ws.recv(), timeout=2.0)
+                        desktop_data = json.loads(desktop_response)
 
-                identified = desktop_data.get('type') == 'identified'
+                        if desktop_data.get('type') == 'identified':
+                            identified = True
+                            break
+                        elif desktop_data.get('type') == 'connected':
+                            continue  # Skip initial connection message
+                    except asyncio.TimeoutError:
+                        break
+
                 self.print_test("Desktop Identification", identified,
-                              f"Response: {desktop_data.get('type')}")
+                              f"Response: {'identified' if identified else 'timeout/wrong-message'}")
 
                 # Connect mobile WebSocket
                 mobile_uri = f"{self.ws_url}"
@@ -301,12 +311,22 @@ class MobilePairingCompleteTest:
                     }
                     await mobile_ws.send(json.dumps(mobile_init))
 
-                    # Wait for mobile channel join
-                    mobile_response = await asyncio.wait_for(mobile_ws.recv(), timeout=5.0)
-                    mobile_data = json.loads(mobile_response)
+                    # Wait for mobile channel join (check multiple messages)
+                    channel_joined = False
+                    actual_channel = ''
+                    for _ in range(3):  # Check up to 3 messages
+                        try:
+                            mobile_response = await asyncio.wait_for(mobile_ws.recv(), timeout=2.0)
+                            mobile_data = json.loads(mobile_response)
 
-                    channel_joined = mobile_data.get('type') == 'channel_joined'
-                    actual_channel = mobile_data.get('channel', '')
+                            if mobile_data.get('type') == 'channel_joined':
+                                channel_joined = True
+                                actual_channel = mobile_data.get('channel', '')
+                                break
+                            elif mobile_data.get('type') == 'connected':
+                                continue  # Skip initial connection message
+                        except asyncio.TimeoutError:
+                            break
 
                     self.print_test("Mobile Channel Join", channel_joined,
                                   f"Channel: {actual_channel}, Expected: {self.channel_id}")
@@ -402,53 +422,39 @@ class MobilePairingCompleteTest:
                     }))
                     await asyncio.wait_for(mobile_ws.recv(), timeout=3.0)  # Wait for channel join
 
-                    # Mobile sends audio via channel
-                    audio_message = {
-                        "type": "channel_message",
-                        "channelId": self.channel_id,
-                        "payload": {
-                            "type": "audio_data",
-                            "format": "wav",
-                            "audio_data": base64_audio,
-                            "timestamp": time.time()
-                        }
-                    }
+                    # Mobile sends RAW BINARY audio (like your frontend does)
+                    await mobile_ws.send(wav_data)  # Raw binary data, not JSON!
+                    self.print_test("Mobile Raw Binary Audio Send", True,
+                                  f"Sent {len(wav_data)} bytes as raw binary from mobile")
 
-                    await mobile_ws.send(json.dumps(audio_message))
-                    self.print_test("Mobile Audio Send", True,
-                                  f"Sent {len(wav_data)} bytes via channel {self.channel_id}")
+                    # Desktop should receive transcription result via channel routing
+                    transcription_received = False
+                    transcription_text = ""
 
-                    # Desktop should receive audio and potentially send transcription
-                    try:
-                        desktop_audio = await asyncio.wait_for(desktop_ws.recv(), timeout=10.0)
-                        audio_received_data = json.loads(desktop_audio)
+                    # Wait for transcription result on desktop (routed via channel)
+                    for _ in range(15):  # 15 attempts, 2s each = 30s total
+                        try:
+                            desktop_msg = await asyncio.wait_for(desktop_ws.recv(), timeout=2.0)
+                            desktop_data = json.loads(desktop_msg)
 
-                        audio_received = (audio_received_data.get('type') == 'channel_message' and
-                                        'audio_data' in audio_received_data.get('payload', {}))
+                            if desktop_data.get('type') == 'transcription_result':
+                                transcription_text = desktop_data.get('text', '')
+                                transcription_received = True
+                                source = desktop_data.get('source', 'unknown')
+                                self.print_test("Mobile → Desktop Transcription Routing", True,
+                                              f"Text: '{transcription_text[:50]}...', Source: {source}")
+                                break
 
-                        self.print_test("Desktop Audio Reception", audio_received,
-                                      f"Received: {audio_received_data.get('payload', {}).get('type', 'unknown')}")
+                        except asyncio.TimeoutError:
+                            continue
+                        except json.JSONDecodeError:
+                            continue  # Skip non-JSON messages
 
-                        # Check for transcription result (may come later)
-                        if audio_received:
-                            try:
-                                transcription_msg = await asyncio.wait_for(desktop_ws.recv(), timeout=15.0)
-                                transcription_data = json.loads(transcription_msg)
+                    if not transcription_received:
+                        self.print_test("Mobile → Desktop Transcription Routing", False,
+                                      "No transcription result received on desktop")
 
-                                transcription_received = (transcription_data.get('type') == 'transcription_result' or
-                                                        'transcription' in str(transcription_data))
-
-                                self.print_test("Transcription Result", transcription_received,
-                                              f"Result type: {transcription_data.get('type', 'none')}")
-
-                            except asyncio.TimeoutError:
-                                self.print_test("Transcription Result", True, "Timeout (expected with test audio)")
-
-                        return audio_received
-
-                    except asyncio.TimeoutError:
-                        self.print_test("Desktop Audio Reception", False, "Desktop didn't receive audio")
-                        return False
+                    return transcription_received
 
         except Exception as e:
             self.print_test("Audio Channel Test", False, f"Error: {e}")
@@ -494,26 +500,131 @@ class MobilePairingCompleteTest:
                     self.print_test("Mobile Disconnect", True, "Mobile disconnected")
 
                     # Desktop should receive disconnect notification
-                    try:
-                        disconnect_msg = await asyncio.wait_for(desktop_ws.recv(), timeout=5.0)
-                        disconnect_data = json.loads(disconnect_msg)
+                    disconnect_received = False
+                    for _ in range(3):  # Check multiple messages
+                        try:
+                            disconnect_msg = await asyncio.wait_for(desktop_ws.recv(), timeout=3.0)
+                            disconnect_data = json.loads(disconnect_msg)
 
-                        disconnect_received = disconnect_data.get('type') == 'mobile_disconnected'
-                        self.print_test("Disconnect Notification", disconnect_received,
-                                      f"Desktop received: {disconnect_data.get('type', 'unknown')}")
+                            if disconnect_data.get('type') == 'mobile_disconnected':
+                                disconnect_received = True
+                                break
 
-                        return disconnect_received
+                        except asyncio.TimeoutError:
+                            break
 
-                    except asyncio.TimeoutError:
-                        self.print_test("Disconnect Notification", False, "No disconnect notification received")
-                        return False
+                    self.print_test("Disconnect Notification", disconnect_received,
+                                  f"Desktop received disconnect: {disconnect_received}")
+
+                    return disconnect_received
 
                 finally:
-                    if not mobile_ws.closed:
-                        await mobile_ws.close()
+                    # Proper cleanup
+                    try:
+                        if hasattr(mobile_ws, 'close') and not getattr(mobile_ws, 'closed', True):
+                            await mobile_ws.close()
+                    except:
+                        pass
 
         except Exception as e:
             self.print_test("Disconnect Flow Test", False, f"Error: {e}")
+            return False
+
+    async def test_standalone_desktop_audio(self):
+        """Test standalone desktop audio flow (your current usage)"""
+        self.print_header("STANDALONE DESKTOP AUDIO (Direct Transcription)")
+
+        if not self.desktop_ws_token:
+            self.print_test("Standalone Audio Test", False, "No desktop WebSocket token")
+            return False
+
+        try:
+            # Use your real audio file for testing
+            try:
+                audio_file_path = "/Users/janwillemvaartjes/Downloads/opname-2025-09-16T16-18-09.wav"
+                with open(audio_file_path, "rb") as f:
+                    real_audio_data = f.read()
+
+                base64_audio = base64.b64encode(real_audio_data).decode('utf-8')
+                audio_description = f"Real audio file: {len(real_audio_data)} bytes"
+
+            except FileNotFoundError:
+                # Fallback to test audio
+                sample_rate = 16000
+                duration_ms = 1000
+                samples = int(sample_rate * duration_ms / 1000)
+                wav_header = b'RIFF' + (36 + samples * 2).to_bytes(4, 'little') + b'WAVE'
+                wav_header += b'fmt ' + (16).to_bytes(4, 'little')
+                wav_header += (1).to_bytes(2, 'little') + (1).to_bytes(2, 'little')
+                wav_header += sample_rate.to_bytes(4, 'little') + (sample_rate * 2).to_bytes(4, 'little')
+                wav_header += (2).to_bytes(2, 'little') + (16).to_bytes(2, 'little')
+                wav_header += b'data' + (samples * 2).to_bytes(4, 'little')
+                real_audio_data = wav_header + b'\x00\x00' * samples
+                base64_audio = base64.b64encode(real_audio_data).decode('utf-8')
+                audio_description = f"Test audio: {len(real_audio_data)} bytes"
+
+            # Test standalone desktop flow (direct to server)
+            desktop_uri = f"{self.ws_url}"
+            async with websockets.connect(desktop_uri, subprotocols=[f"Bearer.{self.desktop_ws_token}"]) as desktop_ws:
+
+                # Desktop identification
+                await desktop_ws.send(json.dumps({
+                    "type": "identify",
+                    "device_type": "desktop",
+                    "session_id": f"standalone-{int(time.time())}"
+                }))
+
+                # Wait for identification (skip connected message)
+                identified = False
+                for _ in range(3):
+                    try:
+                        response = await asyncio.wait_for(desktop_ws.recv(), timeout=2.0)
+                        data = json.loads(response)
+                        if data.get('type') == 'identified':
+                            identified = True
+                            break
+                    except asyncio.TimeoutError:
+                        break
+
+                self.print_test("Standalone Desktop Setup", identified,
+                              "Desktop ready for standalone audio")
+
+                if identified:
+                    # Send audio directly (your frontend flow)
+                    audio_message = {
+                        "type": "audio_data",
+                        "format": "wav",
+                        "audio_data": base64_audio
+                    }
+
+                    await desktop_ws.send(json.dumps(audio_message))
+                    self.print_test("Standalone Audio Direct Send", True,
+                                  audio_description)
+
+                    # Wait for transcription result (real transcription)
+                    transcription_received = False
+                    transcription_text = ""
+
+                    for _ in range(15):  # 15 attempts, 1.5s each = 22.5s total
+                        try:
+                            result_msg = await asyncio.wait_for(desktop_ws.recv(), timeout=1.5)
+                            result_data = json.loads(result_msg)
+
+                            if result_data.get('type') == 'transcription_result':
+                                transcription_text = result_data.get('text', '')
+                                transcription_received = True
+                                break
+
+                        except asyncio.TimeoutError:
+                            continue
+
+                    self.print_test("Standalone Transcription Success", transcription_received,
+                                  f"Text: '{transcription_text[:50]}...'" if transcription_text else "No transcription received")
+
+                    return transcription_received or len(transcription_text) > 0
+
+        except Exception as e:
+            self.print_test("Standalone Desktop Audio Test", False, f"Error: {e}")
             return False
 
     async def run_complete_mobile_pairing_test(self):
@@ -528,6 +639,11 @@ class MobilePairingCompleteTest:
 
         # Run all test phases
         desktop_success = await self.test_desktop_authentication_flow()
+
+        # Test standalone desktop audio flow (your current usage)
+        if desktop_success:
+            await self.test_standalone_desktop_audio()
+
         mobile_success = await self.test_mobile_authentication_flow()
 
         if desktop_success and mobile_success:

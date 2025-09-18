@@ -138,25 +138,28 @@ class ConnectionManager:
         from datetime import datetime
 
         if channel_id in self.channels:
-            logger.debug(f"Broadcasting to channel {channel_id}: {message['type']}")
-            logger.debug(f"Channel members: {list(self.channels[channel_id])}")
-            logger.debug(f"Active connections: {list(self.active_connections.keys())}")
-            logger.debug(f"Excluding: {exclude}")
+            logger.info(f"📡 Broadcasting to channel {channel_id}: {message.get('type')} (exclude: {exclude})")
+            logger.info(f"📋 Channel members: {list(self.channels[channel_id])}")
+            logger.info(f"🔌 Active connections: {list(self.active_connections.keys())}")
 
             # Convert datetime objects to ISO strings for JSON serialization
             serializable_message = self._make_json_serializable(message)
 
+            sent_count = 0
             for client_id in self.channels[channel_id]:
                 if client_id != exclude and client_id in self.active_connections:
-                    logger.debug(f"Sending {message['type']} to {client_id}")
+                    logger.info(f"📤 Sending {message.get('type')} to {client_id}")
                     try:
                         await self.active_connections[client_id].send_text(json.dumps(serializable_message))
+                        sent_count += 1
                     except Exception as e:
                         logger.error(f"Failed to send message to {client_id}: {e}")
                 else:
-                    logger.debug(f"Skipping {client_id}: excluded={client_id == exclude}, active={client_id in self.active_connections}")
+                    logger.info(f"⏭️ Skipping {client_id}: excluded={client_id == exclude}, active={client_id in self.active_connections}")
+
+            logger.info(f"✅ Broadcast complete: {sent_count} messages sent to channel {channel_id}")
         else:
-            logger.warning(f"Channel {channel_id} not found for broadcasting")
+            logger.warning(f"❌ Channel {channel_id} not found for broadcasting. Available: {list(self.channels.keys())}")
 
     def _make_json_serializable(self, obj):
         """
@@ -248,24 +251,55 @@ class PairingService:
             ttl_seconds = 300  # 5 minutes
             await self.store.store_pairing(code, desktop_session_id, ttl_seconds, desktop_auth_info)
 
+        # Track that this user now has an active session
+        if desktop_auth_info and desktop_auth_info.get("username"):
+            user_email = desktop_auth_info["username"]
+            self.user_sessions[user_email] = self.user_sessions.get(user_email, set())
+            self.user_sessions[user_email].add(desktop_session_id)
+
         logger.info(f"Generated pairing code {code} for desktop {desktop_session_id} with auth: {bool(desktop_auth_info)}, expires at {expires_at}")
 
+        # Frontend-compatible response with desktop state
         return {
+            "success": True,
             "code": code,
-            "expires_at": expires_at.isoformat() + "Z",
-            "channel_id": channel_id
+            "channelId": channel_id,  # ✅ camelCase for frontend
+            "desktopState": {
+                "paired": True,          # ✅ Desktop is now in pairing mode
+                "waitingForMobile": True,  # ✅ Status indicator
+                "sessionId": desktop_session_id,
+                "channelId": channel_id
+            },
+            "expiresAt": expires_at.isoformat() + "Z",
+            "expiresIn": 300,
+            "message": "Pairing code generated successfully"
         }
     
     async def validate_pairing(self, code: str, mobile_session_id: str) -> dict:
         """Mobile validates pairing code."""
         channel_id = f"pair-{code}"
 
-        # Validate code format
-        if not code.isdigit() or len(code) != 6:
+        # Validate code format (proper validation)
+        if not code or len(code) != 6:
             return {
                 "success": False,
-                "error": "INVALID_CODE",
-                "message": "Invalid pairing code format"
+                "error": "INVALID_CODE_LENGTH", 
+                "message": f"Pairing code must be exactly 6 digits, got {len(code) if code else 0}",
+                "details": {
+                    "provided_code": code,
+                    "expected_format": "6 digits (000000-999999)"
+                }
+            }
+
+        if not code.isdigit():
+            return {
+                "success": False,
+                "error": "INVALID_CODE_FORMAT",
+                "message": "Pairing code must contain only digits",
+                "details": {
+                    "provided_code": code,
+                    "expected_format": "6 digits (000000-999999)"
+                }
             }
 
         # Check if code exists and hasn't expired
@@ -274,16 +308,23 @@ class PairingService:
         if not desktop_session_id:
             return {
                 "success": False,
-                "error": "INVALID_CODE",
-                "message": "Pairing code does not exist or has expired"
+                "error": "CODE_NOT_FOUND",
+                "message": "Pairing code does not exist or has expired",
+                "details": {
+                    "provided_code": code,
+                    "suggestion": "Generate a new pairing code on desktop"
+                }
             }
 
         logger.info(f"Mobile {mobile_session_id} successfully paired with code {code}")
 
+        # Frontend-compatible response with camelCase
         return {
             "success": True,
-            "channel_id": channel_id,
-            "message": "Device paired successfully"
+            "channelId": channel_id,  # ✅ camelCase for frontend compatibility
+            "message": "Device paired successfully",
+            "pairingCode": code,
+            "expiresIn": 300  # Additional helpful info
         }
 
     async def cleanup_user_sessions(self, user_email: str, new_session_id: str):
