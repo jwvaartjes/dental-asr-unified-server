@@ -211,12 +211,19 @@ class CompleteAPITestSuite:
         headers = {'Content-Type': 'application/json'}
 
         if requires_auth:
-            # Admin endpoints require Bearer token
-            if ('/users/' in path or '/admin/' in path or 'admin' in summary.lower()):
+            # Most admin endpoints now use httpOnly cookies (unified authentication)
+            # Only WebSocket token generation still uses Bearer tokens
+            if ('/ws-token' in path and self.ws_token):
+                headers['Authorization'] = f'Bearer {self.ws_token}'
+            elif ('/users/' in path or '/lexicon/' in path or '/protect_words' in path):
+                # User management and lexicon now use httpOnly cookies - no extra headers needed
+                # The requests session already includes cookies from login
+                pass
+            elif '/admin/' in path or ('admin' in summary.lower() and 'ws-token' not in path):
+                # Other admin endpoints that might still need Bearer tokens
                 if self.ws_token:
                     headers['Authorization'] = f'Bearer {self.ws_token}'
                 else:
-                    # Can't test admin endpoints without Bearer token
                     self.print_test(f"{method} {summary or path}", False, "No Bearer token for admin endpoint", real_path)
                     return
 
