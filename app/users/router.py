@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Query
 
 from .auth import require_admin, require_superadmin, get_current_user
+from ..pairing.auth_dependencies import RequireAuth
 from .service import UserService
 from .schemas import (
     User, UserUpdate, UserListResponse, UserResponse, UserStatsResponse,
@@ -19,6 +20,44 @@ router = APIRouter(prefix="/api/users", tags=["user-management"])
 
 # Service instance
 user_service = UserService()
+
+
+async def get_admin_user_from_cookie_auth(current_user: dict) -> User:
+    """Get admin user using httpOnly cookie authentication (same pattern as lexicon)"""
+    from .auth import user_auth
+
+    user_email = current_user["user"]
+    user = await user_auth.get_user_by_email(user_email)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if user.role not in ["admin", "super_admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+
+    return user
+
+
+async def get_superadmin_user_from_cookie_auth(current_user: dict) -> User:
+    """Get superadmin user using httpOnly cookie authentication (same pattern as lexicon)"""
+    from .auth import user_auth
+
+    user_email = current_user["user"]
+    user = await user_auth.get_user_by_email(user_email)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required"
+        )
+
+    return user
 
 
 def get_client_ip(request: Request) -> str:
@@ -47,10 +86,13 @@ async def get_users(
     role: Optional[str] = Query("all", description="Filter by role: user, admin, all"),
     sort_by: str = Query("created_at", description="Sort by field"),
     sort_order: str = Query("desc", description="Sort order: asc, desc"),
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Get paginated list of users with filtering."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         # Validate parameters
         if status not in ["active", "inactive", "all"]:
             raise HTTPException(status_code=400, detail="Invalid status filter")
@@ -88,10 +130,13 @@ async def get_users(
 
 @router.get("/stats", response_model=UserStatsResponse)
 async def get_user_stats(
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Get user statistics."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         data = await user_service.get_user_stats()
         return UserStatsResponse(data=data)
 
@@ -107,10 +152,13 @@ async def get_user_stats(
 async def get_user(
     user_id: str,
     include_activity: bool = Query(False, description="Include activity log"),
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Get user details by ID."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         user_data = await user_service.get_user(user_id, include_activity=include_activity)
 
         if not user_data:
@@ -136,10 +184,13 @@ async def update_user(
     user_id: str,
     user_update: UserUpdate,
     request: Request,
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Update user information."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.update_user(
@@ -175,10 +226,13 @@ async def update_user(
 async def activate_user(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Activate user account."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.activate_user(
@@ -209,10 +263,13 @@ async def activate_user(
 async def deactivate_user(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Deactivate user account."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.deactivate_user(
@@ -243,10 +300,13 @@ async def deactivate_user(
 async def make_admin(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(require_superadmin)
+    current_user: dict = RequireAuth
 ):
     """Grant admin privileges to user."""
     try:
+        # Get superadmin user using httpOnly cookie authentication
+        admin_user = await get_superadmin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.make_admin(
@@ -277,10 +337,13 @@ async def make_admin(
 async def remove_admin(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(require_superadmin)
+    current_user: dict = RequireAuth
 ):
     """Remove admin privileges from user."""
     try:
+        # Get superadmin user using httpOnly cookie authentication
+        admin_user = await get_superadmin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.remove_admin(
@@ -311,10 +374,13 @@ async def remove_admin(
 async def delete_user(
     user_id: str,
     request: Request,
-    admin_user: User = Depends(require_superadmin)
+    current_user: dict = RequireAuth
 ):
     """Delete user account."""
     try:
+        # Get superadmin user using httpOnly cookie authentication
+        admin_user = await get_superadmin_user_from_cookie_auth(current_user)
+
         ip_address = get_client_ip(request)
 
         success = await user_service.delete_user(
@@ -345,10 +411,13 @@ async def delete_user(
 async def bulk_operation(
     bulk_request: BulkOperationRequest,
     request: Request,
-    admin_user: User = Depends(require_admin)
+    current_user: dict = RequireAuth
 ):
     """Perform bulk operations on users."""
     try:
+        # Get admin user using httpOnly cookie authentication
+        admin_user = await get_admin_user_from_cookie_auth(current_user)
+
         # Require superadmin for certain operations
         dangerous_actions = ["delete", "make_admin", "remove_admin"]
         if bulk_request.action in dangerous_actions and admin_user.role != "super_admin":
