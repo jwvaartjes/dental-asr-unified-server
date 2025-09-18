@@ -220,6 +220,9 @@ async def get_full_lexicon(
 ):
     """Get the complete lexicon from cache - SUPER FAST!"""
     try:
+        # Get admin user ID using same pattern as auth/status
+        admin_user_id = await get_admin_user_id_from_auth(current_user)
+
         # Get from cache/data registry
         lexicon = await data_registry.get_lexicon(admin_user_id)
         protect_data = await data_registry.get_protected_words(admin_user_id)
@@ -775,8 +778,11 @@ async def add_variant_auto(
     """Add a variant with automatic category detection."""
     canonical_term = request.canonical_term
     variant = request.variant
-    
+
     try:
+        # Get admin user ID using same pattern as auth/status
+        admin_user_id = await get_admin_user_id_from_auth(current_user)
+
         # First find the category of the canonical term
         lexicon = await data_registry.get_lexicon(admin_user_id)
         
@@ -847,8 +853,11 @@ async def add_multiword_variant_auto(
     """Add a multi-word variant with automatic category detection."""
     canonical_term = request.canonical_term
     variant_phrase = request.variant_phrase
-    
+
     try:
+        # Get admin user ID using same pattern as auth/status
+        admin_user_id = await get_admin_user_id_from_auth(current_user)
+
         # First find the category of the canonical term
         lexicon = await data_registry.get_lexicon(admin_user_id)
         
