@@ -232,7 +232,11 @@ class CompleteAPITestSuite:
             elif method == 'PUT':
                 response = self.session.put(url, json=test_data, headers=headers, timeout=10)
             elif method == 'DELETE':
-                response = self.session.delete(url, headers=headers, timeout=10)
+                # DELETE operations may need request body (frontend-style)
+                if test_data:
+                    response = self.session.delete(url, json=test_data, headers=headers, timeout=10)
+                else:
+                    response = self.session.delete(url, headers=headers, timeout=10)
             elif method == 'PATCH':
                 response = self.session.patch(url, json=test_data, headers=headers, timeout=10)
             else:
@@ -262,7 +266,10 @@ class CompleteAPITestSuite:
             self.print_test(f"{method} {path}", False, f"Error: {str(e)[:100]}", real_path)
 
     def _resolve_path_parameters(self, path: str) -> str:
-        """Replace path parameters with real values"""
+        """Replace path parameters with real values (frontend-style)"""
+        import urllib.parse
+
+        # Handle path parameters
         if '{user_id}' in path and self.admin_user_data:
             # Use real admin user ID
             real_user_id = self.admin_user_data.get('id', 'test-user-id')
@@ -282,6 +289,16 @@ class CompleteAPITestSuite:
         if '{template_id}' in path:
             # Use real template ID if available
             path = path.replace('{template_id}', 'test-template-id')
+
+        # Add query parameters (frontend-style with proper encoding)
+        if 'check-email' in path and '?' not in path:
+            # Frontend would encode email properly
+            email = urllib.parse.quote('admin@dental-asr.com')
+            path += f'?email={email}'
+        elif 'search' in path and 'lexicon' in path and '?' not in path:
+            # Frontend would encode special characters
+            query = urllib.parse.quote('cariës')
+            path += f'?q={query}'
 
         return path
 
@@ -320,12 +337,18 @@ class CompleteAPITestSuite:
                 return self._generate_minimal_wav_data()
 
         # Real lexicon data
-        elif 'lexicon' in path and method == 'POST':
-            if 'add-canonical' in path:
+        elif 'lexicon' in path:
+            if 'add-canonical' in path and method == 'POST':
                 return {"term": "testterm", "category": "rx_findings"}
-            elif 'add-category' in path:
+            elif 'remove-canonical' in path and method == 'DELETE':
+                return {"term": "testterm", "category": "rx_findings"}
+            elif 'add-category' in path and method == 'POST':
                 return {"category": "test_category", "description": "Test category for API testing"}
-            elif 'add-variant' in path:
+            elif 'delete-category' in path and method == 'POST':
+                return {"category": "test_category"}
+            elif 'add-variant' in path and method == 'POST':
+                return {"canonical": "cariës", "variant": "karies", "category": "rx_findings"}
+            elif 'remove-variant' in path and method == 'POST':
                 return {"canonical": "cariës", "variant": "karies", "category": "rx_findings"}
 
         # Real user management data
