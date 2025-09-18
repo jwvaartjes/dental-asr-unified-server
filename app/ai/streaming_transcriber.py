@@ -251,6 +251,8 @@ class StreamingTranscriber:
         self.normalization_pipeline = normalization_pipeline
         self.client_buffers: Dict[str, AudioBuffer] = {}
         self.transcription_tasks: Dict[str, asyncio.Task] = {}
+        # Session transcription accumulation for paragraph formatting
+        self.session_transcriptions: Dict[str, str] = {}  # client_id -> accumulated text with line breaks
 
     async def handle_audio_chunk(self, client_id: str, audio_message: dict, websocket_manager) -> bool:
         """
@@ -427,16 +429,32 @@ class StreamingTranscriber:
                 except Exception as e:
                     logger.warning(f"Normalization failed: {e}")
 
+            # Session transcription accumulation with line breaks between chunks
+            if client_id not in self.session_transcriptions:
+                self.session_transcriptions[client_id] = ""
+
+            # Add line break if there's already content (creates paragraph formatting)
+            if self.session_transcriptions[client_id].strip():
+                self.session_transcriptions[client_id] += "\n"
+
+            # Append new chunk to session transcription
+            self.session_transcriptions[client_id] += normalized_text
+            session_text = self.session_transcriptions[client_id]
+
+            logger.debug(f"Session transcription for {client_id}: {len(session_text)} chars, {session_text.count(chr(10))} line breaks")
+
             # Send transcription result via WebSocket (both raw and normalized)
             transcription_message = {
                 "type": "transcription_result",
-                "text": normalized_text,  # Main text field (normalized)
-                "raw": raw_text,  # Raw OpenAI transcription
-                "normalized": normalized_text,  # Explicit normalized field
+                "text": normalized_text,  # Main text field (current chunk normalized)
+                "raw": raw_text,  # Raw OpenAI transcription (current chunk)
+                "normalized": normalized_text,  # Explicit normalized field (current chunk)
+                "session_text": session_text,  # Full session transcription with line breaks between chunks
                 "language": result.language or "nl",
                 "duration": getattr(result, 'duration', 0),
                 "confidence": getattr(result, 'confidence', 1.0),
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "chunk_count": session_text.count('\n') + 1  # Number of chunks in session
             }
 
             import json
@@ -501,6 +519,13 @@ class StreamingTranscriber:
                 stats = self.client_buffers[client_id].get_stats()
                 logger.info(f"Final buffer stats for {client_id}: {stats}")
                 del self.client_buffers[client_id]
+
+            # Clean up session transcription (paragraph formatting)
+            if client_id in self.session_transcriptions:
+                session_length = len(self.session_transcriptions[client_id])
+                line_breaks = self.session_transcriptions[client_id].count('\n')
+                logger.info(f"Final session transcription for {client_id}: {session_length} chars, {line_breaks} line breaks")
+                del self.session_transcriptions[client_id]
 
             logger.info(f"Cleaned up streaming resources for client {client_id}")
 
