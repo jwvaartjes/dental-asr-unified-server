@@ -252,24 +252,12 @@ class StreamingTranscriber:
         self.client_buffers: Dict[str, AudioBuffer] = {}
         self.transcription_tasks: Dict[str, asyncio.Task] = {}
 
-    async def handle_audio_chunk(self, client_id: str, audio_message: dict, websocket_manager, 
-                           target_channel: str = None, sender_device_type: str = None) -> bool:
+    async def handle_audio_chunk(self, client_id: str, audio_message: dict, websocket_manager) -> bool:
         """
-        Handle incoming audio chunk from WebSocket with channel-aware result routing
+        Handle incoming audio chunk from WebSocket (simplified like old server)
         Returns True if transcription was triggered
         """
         try:
-            # Store channel info for result routing
-            if hasattr(self, 'client_routing_info'):
-                self.client_routing_info = getattr(self, 'client_routing_info', {})
-            else:
-                self.client_routing_info = {}
-                
-            self.client_routing_info[client_id] = {
-                'channel': target_channel,
-                'device_type': sender_device_type
-            }
-
             # Get or create audio buffer for client (with config from message if available)
             if client_id not in self.client_buffers:
                 # Load thresholds from config if available
@@ -329,12 +317,12 @@ class StreamingTranscriber:
                     if not self.transcription_tasks[client_id].done():
                         self.transcription_tasks[client_id].cancel()
 
-                # Start async transcription with channel-aware routing
+                # Start async transcription with the combined data
                 task = asyncio.create_task(
-                    self._transcribe_audio_data_with_routing(client_id, combined_audio_data, websocket_manager)
+                    self._transcribe_audio_data(client_id, combined_audio_data, websocket_manager)
                 )
                 self.transcription_tasks[client_id] = task
-                logger.info(f"Started channel-aware transcription task for client {client_id}")
+                logger.info(f"Started transcription task for client {client_id}")
                 return True
 
             else:
@@ -464,91 +452,6 @@ class StreamingTranscriber:
         except Exception as e:
             logger.error(f"Transcription error for client {client_id}: {e}")
             await self._send_error(client_id, f"Transcription failed: {str(e)}", websocket_manager)
-
-    async def _transcribe_audio_data_with_routing(self, client_id: str, audio_data: bytes, websocket_manager):
-        """
-        Transcribe audio data with channel-aware result routing
-        Routes results to paired devices or back to sender based on pairing status
-        """
-        try:
-            # Get routing info for this client
-            routing_info = getattr(self, 'client_routing_info', {}).get(client_id, {})
-            target_channel = routing_info.get('channel')
-            device_type = routing_info.get('device_type', 'unknown')
-
-            logger.info(f"🎯 Starting transcription for {client_id}: device={device_type}, channel={target_channel}")
-
-            # Use the original transcription logic
-            result = await self._process_transcription(client_id, audio_data)
-
-            if result and result.text:
-                # Route transcription result based on pairing status
-                transcription_message = {
-                    "type": "transcription_result",
-                    "text": result.text,
-                    "raw": result.raw,
-                    "language": result.language,
-                    "duration": result.duration,
-                    "source": f"{device_type}_audio",
-                    "timestamp": time.time()
-                }
-
-                if target_channel and device_type == "mobile":
-                    # MOBILE PAIRING: Send result to desktop in same channel
-                    logger.info(f"📱 Routing mobile transcription to desktop via channel {target_channel}")
-                    await websocket_manager.broadcast_to_channel(
-                        target_channel,
-                        transcription_message,
-                        exclude=client_id  # Don't send back to mobile
-                    )
-                else:
-                    # STANDALONE: Send result back to sender
-                    logger.info(f"🖥️ Sending standalone transcription result back to {client_id}")
-                    await websocket_manager.send_personal_message(
-                        json.dumps(transcription_message),
-                        client_id
-                    )
-
-                # Update client stats
-                if hasattr(self, 'client_stats'):
-                    if client_id in self.client_stats:
-                        self.client_stats[client_id]['total_transcriptions'] += 1
-
-                return True
-
-            else:
-                logger.warning(f"Transcription failed or empty result for client {client_id}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Error in channel-aware transcription for {client_id}: {e}")
-            # Send error to appropriate target
-            routing_info = getattr(self, 'client_routing_info', {}).get(client_id, {})
-            target_channel = routing_info.get('channel')
-            device_type = routing_info.get('device_type', 'unknown')
-
-            error_message = {
-                "type": "transcription_error",
-                "error": str(e),
-                "client_id": client_id
-            }
-
-            try:
-                if target_channel and device_type == "mobile":
-                    await websocket_manager.broadcast_to_channel(
-                        target_channel,
-                        error_message,
-                        exclude=client_id
-                    )
-                else:
-                    await websocket_manager.send_personal_message(
-                        json.dumps(error_message),
-                        client_id
-                    )
-            except:
-                pass  # Don't fail if error sending fails
-
-            return False
 
     async def _send_error(self, client_id: str, error_message: str, websocket_manager):
         """Send error message to client"""
