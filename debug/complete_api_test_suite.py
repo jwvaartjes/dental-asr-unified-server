@@ -485,6 +485,96 @@ class CompleteAPITestSuite:
         self.print_test("Protected Endpoint Security", success,
                       f"{security_passes}/{min(len(protected_endpoints), 10)} properly protected ({security_rate:.1f}%)")
 
+        # Test specific admin endpoints with non-admin user (SECURITY TEST)
+        await self.test_admin_endpoint_security()
+
+    async def test_admin_endpoint_security(self):
+        """Test that admin endpoints properly reject non-admin users"""
+        print(f"{TestColors.YELLOW}Testing admin endpoint security with non-admin user...{TestColors.END}")
+
+        # Create a non-admin user session (if possible)
+        non_admin_session = requests.Session()
+        non_admin_session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Security-Test'
+        })
+
+        # Try to login as a regular user (not admin)
+        try:
+            regular_user_login = {
+                "email": "test@practijk.nl",  # Non-admin email
+                "password": "test123"
+            }
+
+            login_response = non_admin_session.post(
+                f"{self.base_url}/api/auth/login-magic",
+                json={"email": "test@practijk.nl"},
+                timeout=5
+            )
+
+            # Test lexicon admin endpoints with non-admin session
+            admin_endpoints_to_test = [
+                ("/api/lexicon/categories", "GET"),
+                ("/api/lexicon/add-canonical", "POST"),
+                ("/api/protect_words", "GET")
+            ]
+
+            admin_security_passes = 0
+            for endpoint_path, method in admin_endpoints_to_test:
+                try:
+                    if method == "GET":
+                        response = non_admin_session.get(f"{self.base_url}{endpoint_path}", timeout=5)
+                    elif method == "POST":
+                        response = non_admin_session.post(
+                            f"{self.base_url}{endpoint_path}",
+                            json={"term": "test", "category": "test"},
+                            timeout=5
+                        )
+
+                    # Admin endpoints should reject non-admin users with 401/403
+                    if response.status_code in [401, 403]:
+                        admin_security_passes += 1
+                        print(f"   ✅ {method} {endpoint_path}: Properly rejected ({response.status_code})")
+                    else:
+                        print(f"   ❌ {method} {endpoint_path}: Security gap! Status {response.status_code}")
+
+                except Exception as e:
+                    print(f"   ⚠️ {method} {endpoint_path}: Test error - {str(e)[:50]}")
+
+            # Test without any authentication
+            print(f"{TestColors.YELLOW}Testing admin endpoints without any authentication...{TestColors.END}")
+            no_auth_passes = 0
+            for endpoint_path, method in admin_endpoints_to_test:
+                try:
+                    if method == "GET":
+                        response = requests.get(f"{self.base_url}{endpoint_path}", timeout=5)
+                    elif method == "POST":
+                        response = requests.post(
+                            f"{self.base_url}{endpoint_path}",
+                            json={"term": "test", "category": "test"},
+                            timeout=5
+                        )
+
+                    # Should always reject with 401 (no auth)
+                    if response.status_code == 401:
+                        no_auth_passes += 1
+                        print(f"   ✅ {method} {endpoint_path}: No auth properly rejected (401)")
+                    else:
+                        print(f"   ❌ {method} {endpoint_path}: Security gap! No auth got {response.status_code}")
+
+                except Exception as e:
+                    print(f"   ⚠️ {method} {endpoint_path}: Test error - {str(e)[:50]}")
+
+            total_security_tests = len(admin_endpoints_to_test) * 2
+            total_passes = admin_security_passes + no_auth_passes
+            security_rate = (total_passes / total_security_tests * 100) if total_security_tests > 0 else 0
+
+            self.print_test("Admin Endpoint Security Validation",
+                          security_rate >= 80,
+                          f"{total_passes}/{total_security_tests} admin endpoints properly secured ({security_rate:.1f}%)")
+
+        except Exception as e:
+            self.print_test("Admin Endpoint Security Validation", False, f"Security test failed: {e}")
+
     async def test_endpoint_performance(self):
         """Test endpoint response times"""
         self.print_header("ENDPOINT PERFORMANCE TESTING")

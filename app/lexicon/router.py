@@ -28,12 +28,71 @@ def get_admin_user_id(request: Request) -> str:
     data_registry = get_data_registry(request)
     return data_registry.loader.get_admin_id()
 
+async def get_authenticated_admin_user_id(request: Request) -> str:
+    """Get admin user ID after verifying user is actually admin via httpOnly cookie"""
+    from ..pairing.security import JWTHandler
+    
+    # 1. Extract token from httpOnly cookie
+    token = request.cookies.get("session_token")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
+    
+    # 2. Verify token and get user email
+    payload = JWTHandler.verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    user_email = payload.get("user") or payload.get("email") or payload.get("user_id")
+    if not user_email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format"
+        )
+    
+    # 3. Get user from Supabase and check admin role
+    try:
+        from ..users.auth import user_auth
+        user = await user_auth.get_user_by_email(user_email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        if user.role not in ["admin", "super_admin"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin privileges required for lexicon management"
+            )
+        
+        # 4. Return actual user ID (user-specific data)
+        return user.id
+        
+    except ImportError:
+        # Fallback if user_auth not available - use hardcoded admin
+        data_registry = get_data_registry(request)
+        return data_registry.loader.get_admin_id()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in admin authentication: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication check failed"
+        )
+
 
 # Lexicon Endpoints
 @router.post("/lexicon/add-canonical")
 async def add_canonical_term(
     request: LexiconTermRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a canonical term to the lexicon (Supabase cloud storage)"""
@@ -98,7 +157,7 @@ async def add_canonical_term(
 @router.delete("/lexicon/remove-canonical")
 async def remove_canonical_term(
     request: LexiconTermRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Remove a canonical term from the lexicon"""
@@ -138,7 +197,7 @@ async def remove_canonical_term(
 
 @router.get("/lexicon/categories")
 async def get_lexicon_categories(
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Get all lexicon categories from Supabase"""
@@ -158,7 +217,7 @@ async def get_lexicon_categories(
 @router.get("/lexicon/terms/{category}")
 async def get_category_terms(
     category: str,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Get all terms in a specific category from Supabase"""
@@ -179,7 +238,7 @@ async def get_category_terms(
 
 @router.get("/lexicon/full")
 async def get_full_lexicon(
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Get the complete lexicon from cache - SUPER FAST!"""
@@ -222,7 +281,7 @@ async def get_full_lexicon(
 @router.get("/lexicon/search")
 async def search_lexicon(
     q: str = Query(..., min_length=1),
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """
@@ -288,7 +347,7 @@ async def search_lexicon(
 @router.post("/lexicon/add-category")
 async def add_lexicon_category(
     request: LexiconCategoryRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a new category to the lexicon"""
@@ -319,7 +378,7 @@ async def add_lexicon_category(
 @router.post("/lexicon/delete-category")
 async def delete_lexicon_category(
     request: LexiconCategoryRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Delete a category from the lexicon"""
@@ -352,7 +411,7 @@ async def delete_lexicon_category(
 # Protected Words Endpoints
 @router.get("/protect_words")
 async def get_protect_words(
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Get protected words from Supabase"""
@@ -366,7 +425,7 @@ async def get_protect_words(
 @router.post("/protect_words")
 async def save_protect_words(
     protect_data: dict,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Save protected words to Supabase"""
@@ -398,7 +457,7 @@ async def save_protect_words(
 @router.delete("/protect_words/{word}")
 async def delete_protect_word(
     word: str,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Delete a single protected word"""
@@ -436,7 +495,7 @@ async def delete_protect_word(
 @router.post("/lexicon/add-variant")
 async def add_variant(
     request: VariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a variant/abbreviation to a canonical term."""
@@ -483,7 +542,7 @@ async def add_variant(
 @router.post("/lexicon/remove-variant")
 async def remove_variant(
     request: VariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Remove a variant/abbreviation from a canonical term."""
@@ -525,7 +584,7 @@ async def remove_variant(
 @router.post("/lexicon/add-multiword-variant")
 async def add_multiword_variant(
     request: MultiWordVariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a multi-word variant phrase to a canonical term."""
@@ -572,7 +631,7 @@ async def add_multiword_variant(
 @router.post("/lexicon/remove-multiword-variant")
 async def remove_multiword_variant(
     request: MultiWordVariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Remove a multi-word variant phrase from a canonical term."""
@@ -614,7 +673,7 @@ async def remove_multiword_variant(
 @router.get("/lexicon/variants/{category}")
 async def get_category_variants(
     category: str,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Get all variants/abbreviations for a specific category."""
@@ -639,7 +698,7 @@ async def get_category_variants(
 @router.post("/lexicon/find-canonical")
 async def find_canonical_term(
     request: CanonicalTermInfoRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Find which category a canonical term belongs to."""
@@ -697,7 +756,7 @@ async def find_canonical_term(
 @router.post("/lexicon/add-variant-auto")
 async def add_variant_auto(
     request: AutoVariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a variant with automatic category detection."""
@@ -769,7 +828,7 @@ async def add_variant_auto(
 @router.post("/lexicon/add-multiword-variant-auto")
 async def add_multiword_variant_auto(
     request: AutoMultiWordVariantRequest,
-    admin_user_id: str = Depends(get_admin_user_id),
+    admin_user_id: str = Depends(get_authenticated_admin_user_id),
     data_registry: DataRegistry = Depends(get_data_registry)
 ):
     """Add a multi-word variant with automatic category detection."""
