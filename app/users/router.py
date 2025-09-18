@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Query
 
-from .auth import require_admin, require_superadmin, get_current_user
+from .auth import require_admin, require_superadmin
 from ..pairing.auth_dependencies import RequireAuth
 from .service import UserService
 from .schemas import (
@@ -452,15 +452,3 @@ async def bulk_operation(
         )
 
 
-@router.get("/me/profile")
-async def get_my_profile(
-    current_user: User = Depends(get_current_user)
-):
-    """Get current user's profile."""
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
-
-    return {"success": True, "data": current_user.dict()}
