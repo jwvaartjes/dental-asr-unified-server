@@ -113,6 +113,14 @@ async def login_magic(
         if not user or user.status != "active":
             raise HTTPException(status_code=401, detail="User not found or inactive")
 
+        # 🚨 CRITICAL SECURITY: Block magic login for admin/super_admin accounts
+        if user.role in ["admin", "super_admin"]:
+            logger.warning(f"🚨 SECURITY: Magic login blocked for admin account: {email}")
+            raise HTTPException(
+                status_code=403,
+                detail="Admin accounts must use password authentication for security"
+            )
+
         # Generate token and user data
         token = user_auth.generate_token(user)
         user_data = {
