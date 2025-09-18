@@ -329,16 +329,18 @@ async def check_email(
         # Import here to avoid circular imports
         from app.users.auth import user_auth
 
-        # Simple email existence check
+        # Get user from database with full info
         user = await user_auth.get_user_by_email(email)
         exists = user is not None
 
-        # Simple admin pattern detection for UX
-        is_admin_pattern = any(pattern in email.lower() for pattern in ['admin', 'tandarts', 'dentist'])
+        # Return actual role from database (not pattern matching!)
+        user_role = user.role if user else None
+        is_admin = user_role in ["admin", "super_admin"] if user_role else False
 
         return {
             "exists": exists,
-            "is_admin": is_admin_pattern,
+            "role": user_role,  # ✅ Include actual role for frontend!
+            "is_admin": is_admin,  # ✅ Based on real role, not pattern matching
             "message": f"Email {email} {'exists' if exists else 'not found'}"
         }
     except Exception as e:
@@ -346,6 +348,7 @@ async def check_email(
         # Return safe fallback response
         return {
             "exists": False,
+            "role": None,  # ✅ Consistent with success response
             "is_admin": False,
             "message": "Unable to check email"
         }
