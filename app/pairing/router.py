@@ -353,9 +353,7 @@ async def websocket_endpoint(
                                 transcription_triggered = await original_streaming_transcriber.handle_audio_chunk(
                                     client_id,
                                     audio_message,
-                                    connection_manager,
-                                    target_channel=channel_id,
-                                    sender_device_type=device_type
+                                    connection_manager
                                 )
                                 if transcription_triggered:
                                     route_info = f"channel={channel_id}" if channel_id else "standalone"
