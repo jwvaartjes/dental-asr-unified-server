@@ -258,6 +258,190 @@ async def token_status(request: Request):
             "error": str(e)
         }
 
+@auth_router.get("/session-info")
+async def session_info(request: Request):
+    """Detailed session information with user-friendly messaging for frontend."""
+    from datetime import datetime, timedelta
+    from ..pairing.security import JWTHandler
+    
+    try:
+        # Try to get token from different sources
+        token = None
+        token_source = "none"
+        
+        # First try Authorization header
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+            token_source = "bearer_header"
+        
+        # Fallback: try httpOnly cookie
+        if not token:
+            token = request.cookies.get("session_token")
+            if token:
+                token_source = "httponly_cookie"
+        
+        # No token found - provide clear guidance
+        if not token:
+            return {
+                "authenticated": False,
+                "session_status": "no_session",
+                "token_source": "none",
+                "message": "No authentication session found. Please log in.",
+                "action_required": "login",
+                "login_url": "/login",
+                "can_refresh": False
+            }
+        
+        # Verify token
+        payload = JWTHandler.verify_token(token)
+        if not payload:
+            return {
+                "authenticated": False,
+                "session_status": "expired",
+                "token_source": token_source,
+                "message": "Your session has expired. Please log in again.",
+                "action_required": "logout_and_login", 
+                "login_url": "/login",
+                "can_refresh": False
+            }
+        
+        # Token is valid - calculate detailed expiration info
+        exp_timestamp = payload.get("exp", 0)
+        iat_timestamp = payload.get("iat", 0)
+        current_timestamp = datetime.utcnow().timestamp()
+        
+        time_until_expiry = exp_timestamp - current_timestamp
+        session_age = current_timestamp - iat_timestamp
+        session_duration_hours = (exp_timestamp - iat_timestamp) / 3600
+        
+        # Determine session health and recommendations
+        expires_soon = time_until_expiry < 1800  # 30 minutes
+        expires_very_soon = time_until_expiry < 300  # 5 minutes
+        
+        if expires_very_soon:
+            session_status = "expires_very_soon"
+            message = f"Session expires in {int(time_until_expiry/60)} minutes. Please save your work."
+            action_required = "refresh_soon"
+        elif expires_soon:
+            session_status = "expires_soon"
+            message = f"Session expires in {int(time_until_expiry/60)} minutes."
+            action_required = "refresh_recommended"
+        else:
+            session_status = "active"
+            message = f"Session active. Expires in {int(time_until_expiry/60)} minutes."
+            action_required = "none"
+        
+        return {
+            "authenticated": True,
+            "session_status": session_status,
+            "token_source": token_source,
+            "message": message,
+            "action_required": action_required,
+            "session_info": {
+                "expires_at": datetime.fromtimestamp(exp_timestamp).isoformat() + "Z",
+                "issued_at": datetime.fromtimestamp(iat_timestamp).isoformat() + "Z",
+                "time_until_expiry_seconds": int(time_until_expiry),
+                "time_until_expiry_minutes": int(time_until_expiry / 60),
+                "session_age_minutes": int(session_age / 60),
+                "session_duration_hours": round(session_duration_hours, 1),
+                "expires_soon": expires_soon,
+                "expires_very_soon": expires_very_soon
+            },
+            "can_refresh": True,  # Sessions can potentially be refreshed
+            "user_email": payload.get("email") or payload.get("user")
+        }
+        
+    except Exception as e:
+        logger.error(f"Session info check error: {e}")
+        return {
+            "authenticated": False,
+            "session_status": "error", 
+            "token_source": "unknown",
+            "message": "Unable to check session status. Please try logging in again.",
+            "action_required": "login",
+            "login_url": "/login",
+            "can_refresh": False,
+            "error": str(e)
+        }
+
+@auth_router.post("/refresh-session")
+async def refresh_session(
+    request: Request,
+    response: Response,
+    current_user: dict = RequireAuth
+):
+    """Refresh session by issuing a new token with extended expiry."""
+    from datetime import datetime, timedelta
+    from ..pairing.security import JWTHandler
+    from .auth_response import AuthResponseHandler
+    
+    try:
+        # Import here to avoid circular imports
+        from app.users.auth import user_auth
+
+        # Get user email from current authenticated session
+        user_email = current_user["user"]
+
+        # Fetch full user data from database to ensure user is still active
+        user = await user_auth.get_user_by_email(user_email)
+        if not user or user.status != "active":
+            raise HTTPException(
+                status_code=401, 
+                detail="User not found or inactive. Please log in again."
+            )
+
+        # Generate new token with extended expiry
+        new_token = user_auth.generate_token(user)
+        user_data = {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name or (user.email.split("@")[0] if "@" in user.email else user.email),
+            "role": user.role,
+            "permissions": user.permissions.dict()
+        }
+
+        # Check if request is from mobile device
+        if is_mobile_device(request):
+            # Mobile devices get Bearer token response
+            logger.info(f"Session refresh for mobile user: {user_email}")
+            return {
+                "success": True,
+                "refreshed": True,
+                "message": "Session refreshed successfully",
+                "user": user_data,
+                "token": new_token,
+                "auth_method": "bearer",
+                "expires_in": 8 * 60 * 60,  # 8 hours
+                "refresh_reason": "user_requested"
+            }
+        else:
+            # Desktop gets new httpOnly cookie
+            logger.info(f"Session refresh for desktop user: {user_email}")
+
+            # Create refreshed cookie response
+            cookie_response = AuthResponseHandler.create_cookie_auth_response(
+                response, new_token, user_data, request
+            )
+
+            # Add refresh-specific fields
+            cookie_response.update({
+                "refreshed": True,
+                "message": "Session refreshed successfully",
+                "refresh_reason": "user_requested"
+            })
+
+            return cookie_response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session refresh error: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to refresh session. Please log in again."
+        )
+
 
 @auth_router.post("/logout")
 async def logout(
