@@ -258,6 +258,85 @@ POST /api/ai/transcribe
 **backend Repository**
 https://github.com/jwvaartjes/dental-asr-unified-server
 
+## 🎵 **REAL-TIME AUDIO STREAMING WITH SESSION TRANSCRIPTION**
+
+### **Session-Based Transcription Feature**
+
+**NEW FEATURE**: Automatic paragraph formatting based on natural speech pauses (VAD-detected silence).
+
+#### **How It Works**
+- Each VAD-detected audio chunk is transcribed separately
+- Backend accumulates chunks with line breaks between speech segments
+- Perfect for dental dictation: natural pauses become paragraph breaks
+
+#### **WebSocket Message Format**
+```json
+{
+  "type": "transcription_result",
+  "text": "element 14 distale restauratie",           // Current chunk (real-time)
+  "raw": "element 14 distale restauratie",     // Current chunk raw
+  "normalized": "element 14 distale restauratie", // Current chunk normalized
+  "session_text": "element 11 cariës gevonden\nelement 14 distale restauratie", // Full session with line breaks!
+  "language": "nl",
+  "duration": 2.1,
+  "chunk_count": 2,                            // Number of speech segments
+  "timestamp": 1726686123.456
+}
+```
+
+#### **Frontend Integration Options**
+
+```typescript
+// Option 1: Real-time chunks (existing behavior)
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'transcription_result') {
+    showNewChunk(data.text);  // Show each chunk as it arrives
+  }
+};
+
+// Option 2: Complete session with paragraph formatting (NEW)
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'transcription_result') {
+    displayCompleteTranscription(data.session_text);  // Perfect paragraph formatting!
+  }
+};
+
+// Option 3: Best of both worlds
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'transcription_result') {
+    // Real-time feedback
+    showChunkNotification(data.text);
+
+    // Main transcription area with perfect formatting
+    updateMainTranscription(data.session_text);
+
+    // Progress indicator
+    updateChunkCounter(data.chunk_count);
+  }
+};
+```
+
+#### **Dental Dictation Benefits**
+- **Natural Speech Flow**: Each thought/instruction becomes a new line
+- **Automatic Formatting**: No manual paragraph breaks needed
+- **Professional Layout**: Perfect for dental notes and documentation
+- **Real-time + Session**: Get both immediate feedback and formatted output
+
+#### **Example Session Flow**
+```
+Chunk 1: "element 11 cariës gevonden"
+→ session_text: "element 11 cariës gevonden"
+
+Chunk 2: "behandeling gepland voor volgende week"
+→ session_text: "element 11 cariës gevonden\nbehandeling gepland voor volgende week"
+
+Chunk 3: "element 14 distale restauratie"
+→ session_text: "element 11 cariës gevonden\nbehandeling gepland voor volgende week\nelement 14 distale restauratie"
+```
+
 ## 🌐 **FRONTEND INTEGRATION**
 
 ### **React Frontend Repository**

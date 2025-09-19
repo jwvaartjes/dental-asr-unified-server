@@ -380,13 +380,28 @@ ws.send(JSON.stringify({
 // 4. Send binary audio data
 ws.send(audioBuffer);  // Raw PCM or WAV data
 
-// 5. Receive transcription results
+// 5. Receive transcription results with session formatting
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   if (data.type === 'transcription_result') {
-    console.log('Transcription:', data.text);
-    console.log('Raw:', data.raw);
-    console.log('Normalized:', data.normalized);
+    console.log('Current chunk:', data.text);
+    console.log('Raw chunk:', data.raw);
+    console.log('Normalized chunk:', data.normalized);
+
+    // NEW: Complete session with automatic line breaks between speech segments
+    console.log('Full session:', data.session_text);  // Paragraph formatted!
+    console.log('Chunk count:', data.chunk_count);     // Number of speech segments
+
+    // Frontend options:
+    // Option 1: Show real-time chunks
+    displayCurrentChunk(data.text);
+
+    // Option 2: Show complete session with paragraph formatting
+    displayCompleteTranscription(data.session_text);
+
+    // Option 3: Both - real-time + formatted session
+    showChunkNotification(data.text);
+    updateMainTranscription(data.session_text);
   }
 };
 ```
