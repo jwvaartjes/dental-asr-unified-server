@@ -93,6 +93,51 @@ const tokenStatus = await fetch('/api/auth/token-status', {
   credentials: 'include'
 });
 const { valid, expired, expires_at, should_refresh_soon } = await tokenStatus.json();
+
+// NEW: Detailed session information with user-friendly messaging
+const sessionInfo = await fetch('/api/auth/session-info', {
+  credentials: 'include'
+});
+const {
+  authenticated,
+  session_status,     // "active", "expires_soon", "expires_very_soon", "no_session"
+  message,           // User-friendly message
+  action_required,   // "none", "refresh_recommended", "refresh_soon", "login"
+  session_info       // Detailed timing info
+} = await sessionInfo.json();
+```
+
+### **Session Management & Refresh**
+
+```typescript
+// Session refresh (extend expiry by 8 hours)
+const refreshResponse = await fetch('/api/auth/refresh-session', {
+  method: 'POST',
+  credentials: 'include'
+});
+const { refreshed, message, expires_in } = await refreshResponse.json();
+
+// Automatic session monitoring example
+const monitorSession = async () => {
+  const sessionInfo = await fetch('/api/auth/session-info', {
+    credentials: 'include'
+  });
+  const { authenticated, action_required, message } = await sessionInfo.json();
+
+  if (!authenticated) {
+    // Session expired - redirect to login
+    window.location.href = '/login';
+  } else if (action_required === 'refresh_soon') {
+    // Show warning: session expires in <5 minutes
+    showWarning(message);
+  } else if (action_required === 'refresh_recommended') {
+    // Background refresh recommended
+    await fetch('/api/auth/refresh-session', { method: 'POST', credentials: 'include' });
+  }
+};
+
+// Monitor session every 5 minutes
+setInterval(monitorSession, 5 * 60 * 1000);
 ```
 
 ### **Logout**
