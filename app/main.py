@@ -157,7 +157,7 @@ def create_app(settings=None) -> FastAPI:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=settings.get_allowed_origins(),
-            allow_origin_regex=r"https://.*\.lovable\.app|https://.*\.lovable\.dev|https://.*\.lovableproject\.com|https://.*\.ngrok\.app|https://.*\.ngrok\.io|https://.*\.mondplan\.com",
+            allow_origin_regex=r"https://.*\.lovable\.app|https://.*\.lovable\.dev|https://.*\.lovableproject\.com|https://.*\.ngrok\.app|https://.*\.ngrok\.io|https://.*\.mondplan\.com|https://.*\.vercel\.app",
             allow_credentials=True,  # Enable credentials for httpOnly cookies
             allow_methods=["*"],
             allow_headers=["*"],
@@ -176,7 +176,7 @@ def create_app(settings=None) -> FastAPI:
         if settings.cors_enabled or not settings.cors_enabled:  # For all environments
             csp_policy = (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data: blob:; "
                 "media-src 'self' blob:; "
@@ -184,10 +184,12 @@ def create_app(settings=None) -> FastAPI:
                 "http://localhost:8089 https://localhost:8089 "
                 "http://127.0.0.1:8089 https://127.0.0.1:8089 "
                 "http://localhost:5173 https://localhost:5173 "
+                "https://dental-scribe-glow-aa18kq1s8-mond-plan.vercel.app "
                 "ws://localhost:8089 wss://localhost:8089 "
                 "ws://127.0.0.1:8089 wss://127.0.0.1:8089 "
                 "https://*.supabase.co https://*.openai.com; "
                 "font-src 'self' data:; "
+                "frame-ancestors 'self' http://localhost:* https://localhost:* https://*.lovable.dev https://*.vercel.app; "
                 "object-src 'none'; "
                 "base-uri 'self'"
             )

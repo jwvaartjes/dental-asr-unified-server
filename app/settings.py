@@ -72,6 +72,7 @@ class Settings(BaseSettings):
             "https://lovable.dev",
             "https://dental-asr.ngrok.app",
             "http://dental-asr.ngrok.app",
+            "https://dental-scribe-glow-aa18kq1s8-mond-plan.vercel.app",
             "null"
         ],
         env="ALLOWED_ORIGINS",
