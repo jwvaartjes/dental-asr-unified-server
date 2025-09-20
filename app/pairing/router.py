@@ -265,8 +265,8 @@ async def websocket_endpoint(
 
         # Use original streaming transcriber for binary PCM chunks
         from ..ai.streaming_transcriber import StreamingTranscriber
-        original_streaming_transcriber = StreamingTranscriber(ai_factory, normalization_pipeline)
-        logger.info(f"🔄 Original streaming transcriber initialized for client {client_id} (binary PCM)")
+        original_streaming_transcriber = StreamingTranscriber(ai_factory, normalization_pipeline, data_registry)
+        logger.info(f"🔄 Original streaming transcriber initialized for client {client_id} (binary PCM + dental prompts)")
 
         # Keep realtime transcriber for other cases
         streaming_transcriber = RealtimeTranscriber(ai_factory, normalization_pipeline)
@@ -291,12 +291,16 @@ async def websocket_endpoint(
     # Register with connection manager
     connection_manager.active_connections[client_id] = websocket
     connection_manager.connection_ips[client_id] = client_ip
-    
+
+    # Register with monitoring metrics
+    if hasattr(connection_manager, 'metrics') and connection_manager.metrics:
+        connection_manager.metrics.record_client_connected(client_id, "desktop", client_ip)
+
     # Register with rate limiter if available
     if security_middleware.ws_rate_limiter:
         if hasattr(security_middleware.ws_rate_limiter, 'register_connection'):
             security_middleware.ws_rate_limiter.register_connection(client_ip, client_id)
-    
+
     logger.info(f"Client {client_id} connected from {client_ip}")
     
     try:
@@ -469,20 +473,50 @@ async def websocket_endpoint(
 
                 # Enhanced device identification with session tracking
                 import time
+                identification_time = time.time()
+
                 connection_manager.client_info[client_id] = {
                     "device_type": device_type,
                     "session_id": session_id,
                     "identified": True,
-                    "identification_time": time.time()
+                    "identification_time": identification_time
                 }
+
+                # ATOMIC MULTI-SYSTEM REGISTRATION (prevents state drift)
+                registrations = []
+
+                # 1. Ensure connection manager registration
+                if client_id not in connection_manager.active_connections:
+                    connection_manager.active_connections[client_id] = websocket
+                    registrations.append("connection_manager")
+
+                # 2. Ensure metrics registration with correct device type
+                if hasattr(connection_manager, 'metrics') and connection_manager.metrics:
+                    connection_manager.metrics.record_client_connected(client_id, device_type, client_ip)
+                    registrations.append("metrics_system")
+
+                # 3. Ensure heartbeat registration
+                if hasattr(connection_manager, 'heartbeat') and connection_manager.heartbeat:
+                    connection_manager.heartbeat.register_client(client_id)
+                    registrations.append("heartbeat_system")
 
                 # Update activity on identification
                 connection_manager.update_activity(client_id)
 
+                logger.info(f"✅ Client {client_id} ({device_type}) registered in systems: {registrations}")
+
                 logger.info(f"✅ Client {client_id} identified as {device_type} (session: {session_id})")
 
+                # Send enhanced identification confirmation with registration status
                 await connection_manager.send_personal_message(
-                    json.dumps({"type": "identified", "device_type": device_type}),
+                    json.dumps({
+                        "type": "identified",
+                        "device_type": device_type,
+                        "session_id": session_id,
+                        "registered_systems": registrations,
+                        "registration_status": "fully_registered" if len(registrations) >= 2 else "partial_registration",
+                        "timestamp": float(identification_time)  # Ensure JSON serializable
+                    }),
                     client_id
                 )
                 
@@ -559,16 +593,31 @@ async def websocket_endpoint(
                     logger.warning(f"🎵 Audio message from {client_id} has no channel - not forwarded")
 
             elif msg_type == "ping":
-                # Respond with pong
-                sequence = message.get("sequence", 0)
+                # RFC compliant: Client sends ping, server responds with pong
+                timestamp = message.get("timestamp", time.time())
+
+                # Ensure timestamp is JSON serializable (convert datetime to float if needed)
+                if hasattr(timestamp, 'timestamp'):  # datetime object
+                    timestamp = timestamp.timestamp()
+                elif not isinstance(timestamp, (int, float)):
+                    timestamp = time.time()
+
+                # Track ping reception for heartbeat monitoring
+                connection_manager.heartbeat.handle_ping(client_id, timestamp)
+
+                # Send pong response back to client (JSON safe timestamp)
                 await connection_manager.send_personal_message(
-                    json.dumps({"type": "pong", "sequence": sequence}),
+                    json.dumps({"type": "pong", "timestamp": timestamp}),
                     client_id
                 )
 
+                # Track pong sent
+                connection_manager.heartbeat.handle_pong_sent(client_id)
+                logger.debug(f"💓 Ping from {client_id} → responded with pong")
+
             elif msg_type == "pong":
-                # Just log pong received
-                logger.debug(f"Pong received from {client_id}")
+                # Handle pong from client (should not happen in RFC compliant flow)
+                logger.debug(f"💭 Unexpected pong from {client_id} (clients should send ping, not pong)")
 
             else:
                 # Forward unknown message types to channel (for extensibility)
@@ -586,6 +635,10 @@ async def websocket_endpoint(
         # Clean up streaming transcriber resources (with final flush)
         if streaming_transcriber:
             await streaming_transcriber.cleanup_client(client_id, connection_manager)
+        # Unregister from monitoring metrics
+        if hasattr(connection_manager, 'metrics') and connection_manager.metrics:
+            connection_manager.metrics.record_client_disconnected(client_id, "normal_disconnect")
+
         # Unregister from rate limiter
         if security_middleware.ws_rate_limiter and client_id in connection_manager.connection_ips:
             if hasattr(security_middleware.ws_rate_limiter, 'unregister_connection'):
@@ -600,6 +653,9 @@ async def websocket_endpoint(
         # Clean up streaming transcriber resources (with final flush)
         if streaming_transcriber:
             await streaming_transcriber.cleanup_client(client_id, connection_manager)
+        # Unregister from monitoring metrics
+        if hasattr(connection_manager, 'metrics') and connection_manager.metrics:
+            connection_manager.metrics.record_client_disconnected(client_id, "error_disconnect")
         # Unregister from rate limiter
         if security_middleware.ws_rate_limiter and client_id in connection_manager.connection_ips:
             if hasattr(security_middleware.ws_rate_limiter, 'unregister_connection'):

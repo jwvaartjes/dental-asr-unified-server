@@ -22,6 +22,7 @@ from app.ai.normalization import NormalizationFactory
 from app.data.registry import DataRegistry
 from app.data.loaders.loader_supabase import SupabaseLoader
 from app.data.cache.cache_memory import InMemoryCache
+from app.monitoring.dashboard import MonitoringDashboard
 
 # Setup logging
 logging.basicConfig(
@@ -67,15 +68,50 @@ async def lifespan(app: FastAPI):
         ai_factory = ProviderFactory()
         app.state.ai_factory = ai_factory
         logger.info("✅ AI factory initialized successfully")
+
+        # Initialize transcriber manager for hot-swapping
+        logger.info("🔄 Initializing transcriber manager...")
+        from app.ai.transcriber_manager import initialize_transcriber_manager
+        app.state.transcriber_manager = initialize_transcriber_manager(
+            app.state.ai_factory,
+            app.state.normalization_pipeline,
+            app.state.data_registry
+        )
+        logger.info("✅ Transcriber manager initialized successfully")
+
+        # Initialize monitoring dashboard
+        logger.info("🔄 Initializing monitoring dashboard...")
+        monitoring_dashboard = MonitoringDashboard()
+        app.state.monitoring_dashboard = monitoring_dashboard
+
+        # Add monitoring routes to the app
+        app.include_router(monitoring_dashboard.router)
+        logger.info("✅ Monitoring dashboard initialized successfully")
         
     except Exception as e:
         logger.warning(f"⚠️  Startup initialization failed (will continue): {e}")
     
     logger.info("✅ Pairing server startup completed")
+
+    # Start heartbeat monitoring system
+    logger.info("🔄 Starting heartbeat monitoring system...")
+    try:
+        await app.state.connection_manager.heartbeat.start_heartbeat(app.state.connection_manager)
+        logger.info("✅ Heartbeat monitoring system started successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to start heartbeat monitoring: {e}")
+
+    logger.info("🚀 All systems operational")
     
     yield
-    
+
     # Shutdown
+    logger.info("🔄 Shutting down heartbeat monitoring system...")
+    try:
+        await app.state.connection_manager.heartbeat.stop_heartbeat()
+        logger.info("✅ Heartbeat monitoring system stopped")
+    except Exception as e:
+        logger.error(f"❌ Failed to stop heartbeat monitoring: {e}")
     logger.info("🛑 Shutting down pairing server...")
 
 
@@ -168,6 +204,9 @@ def create_app(settings=None) -> FastAPI:
     app.include_router(users_router)
     app.include_router(templates_router)
     app.include_router(test_router)
+
+    # Add monitoring dashboard after app state is configured
+    # (Will be added dynamically after lifespan startup)
     
     # WebSocket endpoint
     @app.websocket("/ws")
@@ -186,6 +225,16 @@ def create_app(settings=None) -> FastAPI:
             ai_factory=ai_factory,
             normalization_pipeline=normalization_pipeline
         )
+
+    # Monitoring WebSocket endpoint
+    @app.websocket("/ws-monitor")
+    async def websocket_monitor_route(websocket: WebSocket):
+        """WebSocket endpoint for real-time monitoring"""
+        monitoring_dashboard = getattr(app.state, 'monitoring_dashboard', None)
+        if monitoring_dashboard:
+            await monitoring_dashboard.websocket_monitor(websocket)
+        else:
+            await websocket.close(code=1011, reason="Monitoring not available")
     
     # Health check endpoint
     @app.get("/health")
@@ -226,6 +275,14 @@ def create_app(settings=None) -> FastAPI:
             <h3>Configuration & Management:</h3>
             <a href="/config-editor">⚙️ Supabase Config Editor (Monaco)</a>
             <a href="/config-editor-simple">⚙️ Supabase Config Editor (Simple)</a>
+
+            <h3>Monitoring & Observability:</h3>
+            <a href="/monitoring-dashboard">🚀 Visual Monitoring Dashboard</a>
+            <a href="/api/monitoring/dashboard">📊 Monitoring Dashboard (JSON)</a>
+            <a href="/api/monitoring/clients">👥 Active Clients</a>
+            <a href="/api/monitoring/performance">⚡ Performance Summary</a>
+            <a href="/api/monitoring/health">🏥 System Health</a>
+            <a href="/api/monitoring/events">📋 Recent Events</a>
 
             <h3>Test Pages:</h3>
             <a href="/api-test">🔬 Complete API Test Suite</a>
@@ -304,6 +361,15 @@ def create_app(settings=None) -> FastAPI:
             with open(file_path, "r", encoding='utf-8') as f:
                 return HTMLResponse(f.read())
         return HTMLResponse("Rate limiter test page not found", status_code=404)
+
+    @app.get("/monitoring-dashboard")
+    async def visual_monitoring_dashboard():
+        """Visual real-time monitoring dashboard with charts and metrics."""
+        file_path = os.path.join(test_pages_dir, "monitoring_dashboard_visual.html")
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding='utf-8') as f:
+                return HTMLResponse(f.read())
+        return HTMLResponse("Visual monitoring dashboard not found", status_code=404)
 
     @app.get("/config-editor")
     async def config_editor():

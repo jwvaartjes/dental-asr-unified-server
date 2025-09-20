@@ -5,6 +5,9 @@ import logging
 from typing import Dict, Set, Optional
 from fastapi import WebSocket
 
+from ..monitoring.metrics import get_metrics
+from ..monitoring.heartbeat import HeartbeatManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -16,10 +19,22 @@ class ConnectionManager:
         self.channels: Dict[str, Set[str]] = {}
         self.client_info: Dict[str, dict] = {}
         self.connection_ips: Dict[str, str] = {}
-        
+
         # Connection activity tracking for timeout management
         self.last_activity: Dict[str, float] = {}
         self.connection_start_time: Dict[str, float] = {}
+
+        # Monitoring and metrics
+        self.metrics = get_metrics()
+
+        # Heartbeat management for connection health
+        self.heartbeat = HeartbeatManager(
+            ping_interval=30,  # 30 seconds between pings
+            pong_timeout=10,   # 10 seconds to respond
+            max_missed_pongs=2 # 2 missed pongs = stale
+        )
+
+        logger.info("ConnectionManager initialized with monitoring and heartbeat enabled")
 
     async def connect(self, websocket: WebSocket, client_id: str, client_ip: str = None):
         """Accept and register a new WebSocket connection."""
@@ -33,6 +48,13 @@ class ConnectionManager:
         
         if client_ip:
             self.connection_ips[client_id] = client_ip
+
+        # Record connection for monitoring
+        self.metrics.record_client_connected(client_id, device_type="unknown", client_ip=client_ip)
+
+        # Register for heartbeat monitoring
+        self.heartbeat.register_client(client_id)
+
         logger.info(f"Client {client_id} connected from {client_ip}")
 
     async def disconnect(self, client_id: str):
@@ -69,7 +91,14 @@ class ConnectionManager:
             del self.last_activity[client_id]
         if client_id in self.connection_start_time:
             del self.connection_start_time[client_id]
-            
+
+        # Record disconnection for monitoring
+        disconnect_reason = f"{device_type}_disconnect" if device_type != "unknown" else "client_disconnect"
+        self.metrics.record_client_disconnected(client_id, reason=disconnect_reason)
+
+        # Unregister from heartbeat monitoring
+        self.heartbeat.unregister_client(client_id)
+
         logger.info(f"Client {client_id} disconnected")
 
     async def _handle_device_disconnect(self, client_id: str, channel_id: str, device_type: str):
@@ -118,7 +147,11 @@ class ConnectionManager:
             "device_type": device_type,
             "channel": channel_id
         }
-        
+
+        # Update device type in metrics (now that we know it)
+        self.metrics.record_client_connected(client_id, device_type=device_type)
+        self.metrics.record_channel_join(client_id, channel_id)
+
         logger.info(f"Client {client_id} ({device_type}) joined channel {channel_id}")
         
         # Notify others in channel

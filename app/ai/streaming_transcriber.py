@@ -10,6 +10,8 @@ import time
 from typing import Dict, Optional, List
 import wave
 
+from ..monitoring.metrics import get_metrics
+
 logger = logging.getLogger(__name__)
 
 class AudioBuffer:
@@ -93,9 +95,9 @@ class AudioBuffer:
 
         self.last_chunk_time = current_time
 
-        # EXACT OLD SERVER LOGIC:
-        # Process large chunks immediately, buffer small ones
-        if len(audio_data) > self.file_chunk_threshold:
+        # CHUNKING DISABLED - process ALL chunks immediately
+        # if len(audio_data) > self.file_chunk_threshold:
+        if True:  # Process all chunks immediately, no buffering
             # Large WebSocket chunks (e.g., cockpit 3s chunks) - process immediately as LIVE_MIC
             logger.info(f"Large chunk ({len(audio_data)}B > {self.file_chunk_threshold}B) - processing immediately")
 
@@ -240,19 +242,29 @@ class AudioBuffer:
 class StreamingTranscriber:
     """Manages streaming transcription for WebSocket connections"""
 
-    def __init__(self, ai_factory, normalization_pipeline=None):
+    def __init__(self, ai_factory, normalization_pipeline=None, data_registry=None):
         """
         Initialize streaming transcriber
         Args:
             ai_factory: AI factory instance for creating transcription providers
             normalization_pipeline: Pipeline for text normalization
+            data_registry: Data registry for dental prompts and configuration
         """
         self.ai_factory = ai_factory
         self.normalization_pipeline = normalization_pipeline
+        self.data_registry = data_registry
         self.client_buffers: Dict[str, AudioBuffer] = {}
         self.transcription_tasks: Dict[str, asyncio.Task] = {}
         # Session transcription accumulation for paragraph formatting
         self.session_transcriptions: Dict[str, str] = {}  # client_id -> accumulated text with line breaks
+
+        # Concurrency protection - sequential processing per client
+        self.client_processing_locks: Dict[str, asyncio.Lock] = {}  # Prevents race conditions
+        self.client_queues: Dict[str, asyncio.Queue] = {}  # Queues chunks per client
+
+        # Monitoring and metrics
+        self.metrics = get_metrics()
+        logger.info("StreamingTranscriber initialized with monitoring enabled")
 
     async def handle_audio_chunk(self, client_id: str, audio_message: dict, websocket_manager) -> bool:
         """
@@ -307,6 +319,10 @@ class StreamingTranscriber:
                 logger.warning(f"No valid audio data found in message from {client_id}")
                 return False
 
+            # Record audio received for monitoring
+            self.metrics.record_audio_received(client_id, len(audio_data))
+            self.metrics.record_chunk_size(len(audio_data))
+
             # Add chunk using SPSC logic - returns combined data if ready for transcription
             combined_audio_data = buffer.add_chunk(audio_data)
 
@@ -314,17 +330,8 @@ class StreamingTranscriber:
                 # We have audio ready for transcription
                 logger.info(f"Processing {len(combined_audio_data)} bytes of combined audio for {client_id}")
 
-                # Cancel any existing transcription task for this client
-                if client_id in self.transcription_tasks:
-                    if not self.transcription_tasks[client_id].done():
-                        self.transcription_tasks[client_id].cancel()
-
-                # Start async transcription with the combined data
-                task = asyncio.create_task(
-                    self._transcribe_audio_data(client_id, combined_audio_data, websocket_manager)
-                )
-                self.transcription_tasks[client_id] = task
-                logger.info(f"Started transcription task for client {client_id}")
+                # Sequential processing with concurrency protection
+                await self._queue_audio_for_transcription(client_id, combined_audio_data, websocket_manager)
                 return True
 
             else:
@@ -337,11 +344,73 @@ class StreamingTranscriber:
             logger.error(f"Error handling audio chunk from {client_id}: {e}")
             return False
 
+    async def _queue_audio_for_transcription(self, client_id: str, audio_data: bytes, websocket_manager):
+        """Queue audio for sequential transcription - prevents race conditions"""
+        try:
+            # Initialize client-specific concurrency protection if needed
+            if client_id not in self.client_processing_locks:
+                self.client_processing_locks[client_id] = asyncio.Lock()
+                self.client_queues[client_id] = asyncio.Queue()
+
+            # Put audio in queue (non-blocking)
+            await self.client_queues[client_id].put((audio_data, websocket_manager))
+            logger.debug(f"📥 Queued audio chunk for {client_id}: {len(audio_data)} bytes")
+
+            # Update queue metrics
+            queue_size = self.client_queues[client_id].qsize()
+            self.metrics.record_queue_update(client_id, queue_size)
+
+            # Start sequential processor if not already running
+            if client_id not in self.transcription_tasks or self.transcription_tasks[client_id].done():
+                task = asyncio.create_task(self._sequential_transcription_processor(client_id))
+                self.transcription_tasks[client_id] = task
+                logger.debug(f"🔄 Started sequential processor for {client_id}")
+
+        except Exception as e:
+            logger.error(f"Error queueing audio for {client_id}: {e}")
+
+    async def _sequential_transcription_processor(self, client_id: str):
+        """Process queued audio chunks sequentially for a specific client"""
+        try:
+            queue = self.client_queues[client_id]
+
+            while True:
+                try:
+                    # Get next audio chunk from queue (with timeout to prevent hanging)
+                    audio_data, websocket_manager = await asyncio.wait_for(queue.get(), timeout=5.0)
+
+                    # Process this chunk sequentially (no race conditions)
+                    logger.debug(f"🎯 Sequential processing for {client_id}: {len(audio_data)} bytes")
+
+                    # Record processing start time for latency measurement
+                    start_time = self.metrics.record_processing_started(client_id)
+
+                    try:
+                        await self._transcribe_audio_data(client_id, audio_data, websocket_manager)
+                        # Record successful processing
+                        self.metrics.record_processing_completed(client_id, start_time, success=True)
+                    except Exception as e:
+                        # Record failed processing
+                        self.metrics.record_processing_completed(client_id, start_time, success=False)
+                        self.metrics.record_error(client_id, "transcription_error", str(e))
+                        raise
+
+                    # Mark task as done
+                    queue.task_done()
+
+                except asyncio.TimeoutError:
+                    # No more chunks in queue - exit processor
+                    logger.debug(f"⏰ Sequential processor timeout for {client_id} - stopping")
+                    break
+
+        except Exception as e:
+            logger.error(f"Error in sequential processor for {client_id}: {e}")
+
     async def _get_streaming_config(self) -> dict:
         """Get streaming configuration from data registry (like old server)"""
         try:
-            if hasattr(self.ai_factory, 'data_registry') and self.ai_factory.data_registry:
-                config_data = await self.ai_factory.data_registry.get_admin_config()
+            if self.data_registry:
+                config_data = await self.data_registry.get_admin_config()
                 if config_data and 'streaming' in config_data:
                     return config_data['streaming']
         except Exception as e:
@@ -388,21 +457,28 @@ class StreamingTranscriber:
             openai_prompt = ""
             try:
                 # Try to get prompt from data registry if available
-                if hasattr(self.ai_factory, 'data_registry') and self.ai_factory.data_registry:
+                if self.data_registry:
                     # Use identical logic as file upload endpoint
-                    admin_id = self.ai_factory.data_registry.loader.get_admin_id()
-                    config_data = await self.ai_factory.data_registry.get_config(admin_id)
+                    admin_id = self.data_registry.loader.get_admin_id()
+                    config_data = await self.data_registry.get_config(admin_id)
                     openai_prompt = config_data.get('openai_prompt', '') if config_data else ''
-                    logger.debug(f"✅ Using Supabase openai_prompt: {len(openai_prompt)} chars")
+                    logger.debug(f"✅ Streaming using Supabase dental prompt: {len(openai_prompt)} chars")
                     if not openai_prompt:
                         logger.warning("⚠️ No openai_prompt found in Supabase config")
                 else:
-                    logger.warning("⚠️ No data_registry available for prompt retrieval")
+                    logger.warning("⚠️ No data_registry available for dental prompt retrieval")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to get openai_prompt from config: {e}")
+                logger.warning(f"⚠️ Failed to get dental prompt from config: {e}")
 
             # Transcribe with provider (pass openai_prompt exactly like legacy server)
             logger.debug(f"🚀 Calling provider.transcribe with openai_prompt")
+
+            # Record audio format for monitoring
+            self.metrics.record_audio_format("wav")
+
+            # Measure transcription latency
+            transcription_start = time.time()
+
             result = await provider.transcribe(
                 audio_data=audio_buffer,
                 language="nl",  # Dutch
@@ -410,6 +486,10 @@ class StreamingTranscriber:
                 openai_prompt=openai_prompt,  # Pass Supabase prompt as kwarg
                 format="wav"
             )
+
+            # Record transcription latency
+            transcription_latency_ms = (time.time() - transcription_start) * 1000
+            self.metrics.record_transcription_latency(client_id, transcription_latency_ms)
 
             if not result or not result.text:
                 logger.warning(f"Empty transcription result for client {client_id}")
@@ -441,7 +521,12 @@ class StreamingTranscriber:
             self.session_transcriptions[client_id] += normalized_text
             session_text = self.session_transcriptions[client_id]
 
-            logger.debug(f"Session transcription for {client_id}: {len(session_text)} chars, {session_text.count(chr(10))} line breaks")
+            # Update session metrics
+            session_length = len(session_text)
+            line_breaks = session_text.count('\n')
+            self.metrics.record_session_update(client_id, session_length, line_breaks)
+
+            logger.debug(f"Session transcription for {client_id}: {session_length} chars, {line_breaks} line breaks")
 
             # Send transcription result via WebSocket (both raw and normalized)
             transcription_message = {
@@ -527,7 +612,22 @@ class StreamingTranscriber:
                 logger.info(f"Final session transcription for {client_id}: {session_length} chars, {line_breaks} line breaks")
                 del self.session_transcriptions[client_id]
 
-            logger.info(f"Cleaned up streaming resources for client {client_id}")
+            # Clean up concurrency protection resources
+            if client_id in self.client_processing_locks:
+                del self.client_processing_locks[client_id]
+
+            if client_id in self.client_queues:
+                # Clear any remaining items in queue
+                queue = self.client_queues[client_id]
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                        queue.task_done()
+                    except asyncio.QueueEmpty:
+                        break
+                del self.client_queues[client_id]
+
+            logger.info(f"Cleaned up streaming resources for client {client_id} (including concurrency protection)")
 
         except Exception as e:
             logger.error(f"Error during cleanup for {client_id}: {e}")

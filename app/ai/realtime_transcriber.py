@@ -42,10 +42,15 @@ class RealtimeTranscriber:
         # Client sessions
         self.client_sessions: Dict[str, 'ClientSession'] = {}
 
-        # Endpointing configuration (tunable via environment)
-        self.min_chunk_ms = int(os.getenv("REALTIME_MIN_CHUNK_MS", "900"))
-        self.max_chunk_ms = int(os.getenv("REALTIME_MAX_CHUNK_MS", "2000"))
-        self.silence_ms = int(os.getenv("REALTIME_SILENCE_MS", "400"))
+        # Endpointing configuration (tunable via environment) - DISABLED for testing
+        # self.min_chunk_ms = int(os.getenv("REALTIME_MIN_CHUNK_MS", "900"))
+        # self.max_chunk_ms = int(os.getenv("REALTIME_MAX_CHUNK_MS", "2000"))
+        # self.silence_ms = int(os.getenv("REALTIME_SILENCE_MS", "400"))
+
+        # VAD DISABLED - use very high values to prevent chunking
+        self.min_chunk_ms = 30000  # 30 seconds
+        self.max_chunk_ms = 60000  # 60 seconds
+        self.silence_ms = 10000    # 10 seconds
 
         # Audio analysis thresholds
         self.rms_voice_threshold = float(os.getenv("REALTIME_RMS_VOICE", "0.015"))
@@ -467,26 +472,26 @@ class ClientSession:
         if analysis['is_voice']:
             self.last_voice_time = now
 
-        # 3. Decide whether to commit
+        # 3. Decide whether to commit - VAD DISABLED
         should_commit = False
 
-        # Silence-based commit (after minimum duration)
-        if (analysis['is_silence'] and
-            elapsed_ms >= self.transcriber.min_chunk_ms and
-            idle_ms >= self.transcriber.silence_ms):
-            should_commit = True
-            logger.debug(f"🤐 Silence commit for {self.client_id}: "
-                        f"elapsed={elapsed_ms:.0f}ms, idle={idle_ms:.0f}ms")
+        # # Silence-based commit (after minimum duration) - DISABLED
+        # if (analysis['is_silence'] and
+        #     elapsed_ms >= self.transcriber.min_chunk_ms and
+        #     idle_ms >= self.transcriber.silence_ms):
+        #     should_commit = True
+        #     logger.debug(f"🤐 Silence commit for {self.client_id}: "
+        #                 f"elapsed={elapsed_ms:.0f}ms, idle={idle_ms:.0f}ms")
 
-        # Hard cap commit
-        elif elapsed_ms >= self.transcriber.max_chunk_ms:
-            should_commit = True
-            logger.debug(f"⏰ Max duration commit for {self.client_id}: "
-                        f"elapsed={elapsed_ms:.0f}ms")
+        # # Hard cap commit - DISABLED
+        # elif elapsed_ms >= self.transcriber.max_chunk_ms:
+        #     should_commit = True
+        #     logger.debug(f"⏰ Max duration commit for {self.client_id}: "
+        #                 f"elapsed={elapsed_ms:.0f}ms")
 
-        # 4. Commit if needed
-        if should_commit and len(self.accumulated_audio) > 0:
-            await self._commit_audio()
+        # 4. Commit if needed - NO AUTO COMMITS, only manual force_commit
+        # if should_commit and len(self.accumulated_audio) > 0:
+        #     await self._commit_audio()
 
     async def _commit_audio(self) -> None:
         """Commit current audio buffer and request transcription."""
